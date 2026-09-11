@@ -14,6 +14,7 @@ export async function POST(req: Request) {
     image?: string;
     request?: string;
     placed?: { name: string; qty: number }[];
+    capacity?: { floorAreaM2: number; freeFloorM2: number };
   };
   try {
     payload = await req.json();
@@ -21,7 +22,7 @@ export async function POST(req: Request) {
     return Response.json({ error: "invalid body" }, { status: 400 });
   }
 
-  const { image, request: userRequest, placed } = payload;
+  const { image, request: userRequest, placed, capacity } = payload;
   if (!image || typeof image !== "string" || !image.startsWith("data:")) {
     return Response.json({ error: "image data URL required" }, { status: 400 });
   }
@@ -61,6 +62,7 @@ export async function POST(req: Request) {
       userRequest.trim(),
       catalog,
       Array.isArray(placed) ? placed : [],
+      capacity && Number.isFinite(capacity.freeFloorM2) ? capacity : undefined,
     );
 
     // Resolve to real products and enforce the budget here. Lines are kept in the

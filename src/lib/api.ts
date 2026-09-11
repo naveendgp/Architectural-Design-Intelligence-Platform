@@ -97,6 +97,7 @@ export const api = {
     image: string;
     request: string;
     placed: { name: string; qty: number }[];
+    capacity?: { floorAreaM2: number; freeFloorM2: number };
   }) => {
     const res = await fetch("/api/ai/design", {
       method: "POST",

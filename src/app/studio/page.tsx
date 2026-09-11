@@ -46,6 +46,8 @@ import {
   objectBoxToOBB,
   setSceneCalib,
   rearrangeAnchors,
+  floorCapacity,
+  footprintAreaM2,
   FLOOR_REGION,
   CEILING_ANCHOR_BAND,
 } from "@/lib/placement";
@@ -546,6 +548,89 @@ function Studio() {
     for (const it of items) counts.set(it.product.name, (counts.get(it.product.name) ?? 0) + 1);
     return [...counts].map(([name, qty]) => ({ name, qty }));
   }, [items]);
+
+  // How much floor the planner actually has to work with. Measured with the same
+  // geometry the placement engine packs into, so the AI is told a real number
+  // instead of judging capacity by eye from the photo.
+  const roomCapacity = useMemo(() => {
+    const aspect = stage.w / Math.max(1, stage.h);
+    const obstacles = realObjects.map((b) => objectBoxToOBB(b, aspect, calib, depth));
+    const { totalM2, freeM2 } = floorCapacity(items, aspect, calib, depth, obstacles);
+    return { floorAreaM2: totalM2, freeFloorM2: freeM2 };
+  }, [items, stage, calib, depth, realObjects]);
+
+  /* Dry-run a plan through the real packing engine before we show it.
+
+     The planner proposes from the photo, so it can over-order for a narrow space.
+     Rather than promising pieces that won't fit and apologising after the user
+     hits Apply, we pack them here — no DB writes — and hand back the quantities
+     that genuinely seat. */
+  const fitPlan = useCallback(
+    (entries: { productId: string; qty: number }[]) => {
+      const aspect = stage.w / Math.max(1, stage.h);
+      const obstacles: OBB[] = realObjects.map((b) => objectBoxToOBB(b, aspect, calib, depth));
+      let working: PlacedItemDTO[] = [...items];
+      const fitted: { productId: string; qty: number }[] = [];
+
+      // Largest pieces first: a sofa that only fits in an empty room should claim
+      // its spot before the stools nibble away at the space.
+      const order = entries
+        .map((e) => ({ entry: e, product: products.find((p) => p.id === e.productId) }))
+        .filter((x): x is { entry: typeof x.entry; product: ProductDTO } => !!x.product)
+        .sort(
+          (a, b) =>
+            footprintAreaM2(
+              { widthCm: b.product.widthCm, depthCm: b.product.depthCm, scale: DEFAULT_SCALE },
+              calib,
+            ) -
+            footprintAreaM2(
+              { widthCm: a.product.widthCm, depthCm: a.product.depthCm, scale: DEFAULT_SCALE },
+              calib,
+            ),
+        );
+
+      for (const { entry, product } of order) {
+        const ceiling = product.mount === "ceiling";
+        const region = ceiling ? CEILING_ANCHOR_BAND : FLOOR_REGION;
+        const spec: FootprintSpec = {
+          widthCm: product.widthCm,
+          depthCm: product.depthCm,
+          scale: DEFAULT_SCALE,
+          yawDeg: (product.frontYaw ?? 0) + (depth?.roomYawDeg ?? 0),
+          mount: ceiling ? "ceiling" : "floor",
+        };
+        const fallback = ceiling ? CEILING_FALLBACK : FLOOR_FALLBACK;
+
+        let seatedCount = 0;
+        for (let i = 0; i < entry.qty; i++) {
+          const samePlane = working.filter((it) => (it.product.mount === "ceiling") === ceiling);
+          const free =
+            findFreeAnchor(fallback.posX, fallback.posZ, spec, samePlane, aspect, calib, depth, region, obstacles) ??
+            findFreeAnchor(fallback.posX, fallback.posZ, spec, samePlane, aspect, calib, depth, region, []);
+          if (!free) break; // plane is full — stop adding this piece
+          seatedCount++;
+          working = [
+            ...working,
+            {
+              id: `${PENDING_ID}${working.length}`,
+              productId: product.id,
+              product,
+              posX: free.ax,
+              posY: 0,
+              posZ: free.ay,
+              rotationY: 0,
+              tiltX: 0,
+              tiltZ: 0,
+              scale: DEFAULT_SCALE,
+            },
+          ];
+        }
+        if (seatedCount > 0) fitted.push({ productId: product.id, qty: seatedCount });
+      }
+      return fitted;
+    },
+    [items, products, stage, calib, depth, realObjects],
+  );
 
   /* Place a whole AI design plan at once.
 
@@ -1162,6 +1247,8 @@ function Studio() {
           edited={!!(project?.originalPhotoUrl && project.originalPhotoUrl !== project.photoUrl)}
           capture={captureStage}
           placed={placedSummary}
+          capacity={roomCapacity}
+          onFitPlan={fitPlan}
           onApplyPlan={addFurnitureBatch}
         />
 

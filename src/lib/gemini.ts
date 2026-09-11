@@ -233,6 +233,7 @@ export async function designPlan(
   request: string,
   catalog: CatalogEntry[],
   placed: { name: string; qty: number }[],
+  capacity?: { floorAreaM2: number; freeFloorM2: number },
 ): Promise<DesignPlan> {
   const catalogList = catalog
     .map((p) => {
@@ -248,6 +249,30 @@ export async function designPlan(
     ? placed.map((p) => `- ${p.qty} × ${p.name}`).join("\n")
     : "- (room is empty)";
 
+  /* Capacity is MEASURED by the app's placement geometry, not guessed from the
+     photo — without it the model happily proposes a lounge suite for a corridor.
+
+     The fill ratio is deliberately generous: freeFloorM2 already describes only
+     the band the engine seats into (a strip a few metres deep), with existing
+     furniture and detected real objects subtracted, so most walking room is
+     accounted for before we get here. Anything the model still over-orders is
+     trimmed by the caller's dry-run through the real packer, so erring slightly
+     full costs nothing while erring empty leaves rooms bare. */
+  const usableM2 = capacity ? capacity.freeFloorM2 * 0.6 : 0;
+  const capacityBlock = capacity
+    ? `MEASURED SPACE (from the app's own floor geometry — trust these numbers over
+your impression of the photo):
+- Usable floor area: ${capacity.floorAreaM2.toFixed(1)} m²
+- Still free after what's already placed: ${capacity.freeFloorM2.toFixed(1)} m²
+- So the pieces you add should have a COMBINED FOOTPRINT of at most about
+  ${usableM2.toFixed(1)} m² (width × depth, summed over every piece including
+  duplicates). The remaining floor is walking space and must stay clear.
+- Work this out explicitly as you choose: a 220×95cm sofa is 2.1 m², a 55×58cm
+  chair is 0.3 m². Stop adding pieces once you approach the cap. It is much
+  better to propose two pieces that fit beautifully than six that crowd the room.`
+    : `SPACE: judge the usable floor from the photo. A narrow corridor or lift lobby
+fits perhaps 2-4 small pieces against the walls — NOT a full living-room set.`;
+
   const prompt = `You are an interior designer furnishing a real room from a real product catalog.
 
 THE ROOM: the attached photo is the actual space. Study it first — what kind of
@@ -257,6 +282,8 @@ naturally sit, walk, or wait?
 
 ALREADY IN THE ROOM:
 ${placedList}
+
+${capacityBlock}
 
 THE CATALOG — you may ONLY choose from these, using the exact id string:
 ${catalogList}
@@ -273,10 +300,8 @@ RULES:
 - Choose real ids from the catalog above. Never invent an id or a product name.
 - Match the STYLE the user asked for (modern, classical, luxury, minimal) using
   each product's style tags, and match the room you can see in the photo.
-- Respect the SPACE. Read the floor area in the photo and only specify what
-  physically fits with walking room left over. A narrow corridor or lift lobby
-  fits perhaps 2-4 small pieces against the walls — NOT a full living-room set.
-  Use each product's cm dimensions to judge this.
+- Respect the SPACE above all. Keep the combined footprint within the cap and
+  leave walking room. Under-filling is fine; overcrowding is not.
 - BUDGET: if the request names one (e.g. "under 5 lakhs", "₹2L", "50k"), convert
   it to rupees in budgetInr (1 lakh = 100000) and keep the TOTAL of
   price × qty at or under it. If no budget is mentioned, set budgetInr to 0.

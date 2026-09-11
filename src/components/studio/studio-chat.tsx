@@ -21,6 +21,8 @@ export type Plan = {
   budgetInr: number;
   totalInr: number;
   trimmed: boolean;
+  /** Pieces the packing engine couldn't seat, so they never reach the card. */
+  droppedForSpace?: string[];
   items: PlanLine[];
   applied?: boolean;
 };
@@ -68,6 +70,8 @@ export function StudioChat({
   edited,
   capture,
   placed,
+  capacity,
+  onFitPlan,
   onApplyPlan,
 }: {
   products: ProductDTO[];
@@ -81,6 +85,10 @@ export function StudioChat({
   capture?: () => Promise<string>;
   /** What's already in the room, so the planner doesn't duplicate it. */
   placed?: { name: string; qty: number }[];
+  /** Measured floor area, so the planner sizes the set to the actual space. */
+  capacity?: { floorAreaM2: number; freeFloorM2: number };
+  /** Dry-run a plan through the packing engine; returns what genuinely seats. */
+  onFitPlan?: (entries: { productId: string; qty: number }[]) => { productId: string; qty: number }[];
   /** Place a whole plan at once, spaced apart. Returns what actually fit. */
   onApplyPlan?: (
     entries: { productId: string; qty: number }[],
@@ -208,8 +216,15 @@ export function StudioChat({
     setBusyLabel("Designing your room… (~5–10s)");
     setTyping(true);
     try {
-      const shot = await capture();
-      const plan = await api.design({ image: shot, request: raw, placed: placed ?? [] });
+      // Hard ceiling on the whole round-trip so a stalled capture or a slow model
+      // can never leave the panel spinning.
+      const plan = await Promise.race([
+        (async () => {
+          const shot = await capture();
+          return api.design({ image: shot, request: raw, placed: placed ?? [], capacity });
+        })(),
+        new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout")), 45000)),
+      ]);
       setTyping(false);
 
       if (plan.offTopic || plan.items.length === 0) {
@@ -226,6 +241,39 @@ export function StudioChat({
         return;
       }
 
+      // Pack the proposal for real before showing it, so the card never promises
+      // pieces the room can't take.
+      let items = plan.items;
+      let droppedForSpace: string[] = [];
+      if (onFitPlan) {
+        const fitted = onFitPlan(items.map((l) => ({ productId: l.product.id, qty: l.qty })));
+        const qtyById = new Map(fitted.map((f) => [f.productId, f.qty]));
+        const next: PlanLine[] = [];
+        for (const line of items) {
+          const qty = qtyById.get(line.product.id) ?? 0;
+          if (qty <= 0) {
+            droppedForSpace.push(line.product.name);
+            continue;
+          }
+          if (qty < line.qty) droppedForSpace.push(`${line.qty - qty} × ${line.product.name}`);
+          next.push({ ...line, qty, subtotalInr: line.product.priceInr * qty });
+        }
+        items = next;
+      }
+
+      if (items.length === 0) {
+        setMessages((m) => [
+          ...m,
+          {
+            id: Date.now() + 1,
+            role: "ai",
+            text: "This room doesn't have clear floor space left for anything more. Remove a piece or two and ask me again, and I'll design around what's left.",
+          },
+        ]);
+        return;
+      }
+
+      const totalInr = items.reduce((n, l) => n + l.subtotalInr, 0);
       setMessages((m) => [
         ...m,
         {
@@ -235,9 +283,10 @@ export function StudioChat({
           plan: {
             intent: plan.intent,
             budgetInr: plan.budgetInr,
-            totalInr: plan.totalInr,
+            totalInr,
             trimmed: plan.trimmed,
-            items: plan.items,
+            droppedForSpace,
+            items,
           },
         },
       ]);
@@ -565,6 +614,11 @@ function PlanCard({
         </div>
         {plan.trimmed && (
           <p className="text-[11px] text-subtle mt-1">Trimmed to stay within your budget.</p>
+        )}
+        {plan.droppedForSpace && plan.droppedForSpace.length > 0 && (
+          <p className="text-[11px] text-subtle mt-1">
+            Sized to the room — left out {plan.droppedForSpace.join(", ")} for want of floor space.
+          </p>
         )}
 
         {plan.applied ? (

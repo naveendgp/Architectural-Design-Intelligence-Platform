@@ -303,6 +303,53 @@ export function footprintAreaM2(spec: { widthCm: number | null; depthCm: number 
   return 4 * hw * hd;
 }
 
+/**
+ * Usable floor of the room in m², and how much of it is still free.
+ *
+ * The AI planner used to eyeball capacity from the photo, which is why it would
+ * propose a five-piece lounge set for a narrow lift lobby. This measures the same
+ * floor the placement engine actually packs into, so the planner can be told a
+ * real number instead of guessing.
+ *
+ * The floor band is a rectangle in image space but a trapezoid in world space
+ * (perspective), so the corners are projected and the area taken by shoelace.
+ */
+export function floorCapacity(
+  placed: PlacedItemDTO[],
+  aspect: number,
+  calib: Calibration,
+  depth: DepthField | null,
+  obstacles: OBB[] = [],
+  region: Region = FLOOR_REGION,
+): { totalM2: number; freeM2: number } {
+  const corners: { x: number; z: number }[] = [
+    groundXZ(region.minX, region.minY, "floor", aspect, calib, depth),
+    groundXZ(region.maxX, region.minY, "floor", aspect, calib, depth),
+    groundXZ(region.maxX, region.maxY, "floor", aspect, calib, depth),
+    groundXZ(region.minX, region.maxY, "floor", aspect, calib, depth),
+  ];
+  let twice = 0;
+  for (let i = 0; i < corners.length; i++) {
+    const a = corners[i];
+    const b = corners[(i + 1) % corners.length];
+    twice += a.x * b.z - b.x * a.z;
+  }
+  const totalM2 = Math.abs(twice) / 2;
+
+  let used = 0;
+  for (const it of placed) {
+    if (it.product.mount === "ceiling") continue;
+    used += footprintAreaM2(
+      { widthCm: it.product.widthCm, depthCm: it.product.depthCm, scale: it.scale },
+      calib,
+    );
+  }
+  // Detected real objects (existing sofas, a wheelchair…) also eat floor.
+  for (const o of obstacles) used += 4 * o.hw * o.hd;
+
+  return { totalM2, freeM2: Math.max(0, totalM2 - used) };
+}
+
 /** A real floor object detected by segmentation: normalized image box (top-left). */
 export type FloorObjectBox = { label: string; x0: number; y0: number; x1: number; y1: number };
 
