@@ -9,7 +9,7 @@ import type { DepthField } from "@/lib/depth";
 import {
   type Calibration,
   clamp01,
-  ceilingAnchor,
+  clampDragAnchor,
   itemAnchor,
   itemWorldPos,
   FALLBACK_ANCHOR,
@@ -217,7 +217,10 @@ function PointerLayer({
         const obj = registry.current.get(dragId.current);
         const ax = clamp01(p.ax - grabOffset.current.x);
         const ay = clamp01(p.ay - grabOffset.current.y);
-        const anchor = obj?.userData?.mount === "ceiling" ? ceilingAnchor(ax, ay) : { ax, ay };
+        // Keep the piece on a surface it can sit on — a floor piece dragged toward
+        // the top of the photo must stop at the floor line, not climb the wall.
+        const mount = obj?.userData?.mount === "ceiling" ? "ceiling" : "floor";
+        const anchor = clampDragAnchor(ax, ay, mount);
         onMove(dragId.current, anchor.ax, anchor.ay);
       } else {
         document.body.style.cursor = pick(ev) ? "grab" : "auto";

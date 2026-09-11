@@ -90,6 +90,47 @@ export const api = {
       // avoid re-calling Gemini for every add). Populated only if the model returns them.
       spots?: { ax: number; ay: number; facingDeg: number; confidence?: number }[];
     }>("/api/ai/place", "POST", input),
+  // AI: turn a free-form design request ("make this lobby a modern waiting area
+  // under ₹5 lakh") into a concrete list of catalog pieces to add. The catalog is
+  // resolved server-side, so this returns full products ready to render.
+  design: async (input: {
+    image: string;
+    request: string;
+    placed: { name: string; qty: number }[];
+  }) => {
+    const res = await fetch("/api/ai/design", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      intent?: string;
+      reply?: string;
+      offTopic?: boolean;
+      budgetInr?: number;
+      totalInr?: number;
+      trimmed?: boolean;
+      items?: { product: ProductDTO; qty: number; reason: string; subtotalInr: number }[];
+      error?: string;
+      code?: string;
+    };
+    if (!res.ok) {
+      const err = new Error(data.error || `Design failed: ${res.status}`) as Error & {
+        code?: string;
+      };
+      err.code = data.code;
+      throw err;
+    }
+    return {
+      intent: data.intent ?? "",
+      reply: data.reply ?? "",
+      offTopic: data.offTopic === true,
+      budgetInr: data.budgetInr ?? 0,
+      totalInr: data.totalInr ?? 0,
+      trimmed: data.trimmed === true,
+      items: data.items ?? [],
+    };
+  },
   // AI: edit the room's base photo (wallpaper, curtains, paint, flooring…) and set it
   // as the project's new photo. Returns the new photoUrl. Surfaces error code.
   editRoom: async (projectId: string, photoUrl: string, instruction: string) => {

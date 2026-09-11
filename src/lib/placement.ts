@@ -97,6 +97,30 @@ export function groundAnchor(
   return { ax: clamp01(ax), ay: clamp01(Math.max(ay, ft + 0.015)) };
 }
 
+/* Widest band a floor piece may be DRAGGED to, used when there is no scene
+   calibration to ground against. Looser than FLOOR_REGION (which is where
+   auto-placement seats things) so a user can deliberately tuck a piece nearer an
+   edge than the AI would — but never up a wall or into the ceiling. */
+const DRAG_FLOOR_BAND = { minX: 0.03, maxX: 0.97, minY: 0.55, maxY: 0.97 };
+
+/**
+ * Constrain a dragged anchor to a surface its mount can actually sit on. Uses the
+ * detected floor/ceiling lines when the room has been analysed, and a safe static
+ * band when it hasn't — without this a sofa can be dragged onto the back wall.
+ */
+export function clampDragAnchor(
+  ax: number,
+  ay: number,
+  mount: "floor" | "ceiling",
+): { ax: number; ay: number } {
+  if (mount === "ceiling") return groundAnchor(ax, ay, "ceiling");
+  const x = Math.min(DRAG_FLOOR_BAND.maxX, Math.max(DRAG_FLOOR_BAND.minX, ax));
+  const y = Math.min(DRAG_FLOOR_BAND.maxY, Math.max(DRAG_FLOOR_BAND.minY, ay));
+  // With calibration, the real floor line is the authority (it may sit lower than
+  // the static band in a photo where the floor starts late, e.g. a corridor).
+  return SCENE_CALIB ? groundAnchor(x, y, "floor") : { ax: x, ay: y };
+}
+
 export function anchorToPoint(
   ax: number,
   ay: number,

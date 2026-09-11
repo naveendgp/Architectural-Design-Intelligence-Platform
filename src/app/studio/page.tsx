@@ -532,6 +532,149 @@ function Studio() {
     [projectId, items, products, project?.photoUrl, stage, calib, depth, realObjects],
   );
 
+  // The room as it looks right now (photo + placed 3D) — what the AI designer
+  // reads to judge the space and what's already in it.
+  const captureStage = useCallback(async () => {
+    if (!stageRef.current || !project?.photoUrl) throw new Error("stage not ready");
+    return captureComposite(stageRef.current, project.photoUrl);
+  }, [project?.photoUrl]);
+
+  // Compact "what's already here" list for the planner, so it doesn't re-add
+  // pieces the room already has.
+  const placedSummary = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const it of items) counts.set(it.product.name, (counts.get(it.product.name) ?? 0) + 1);
+    return [...counts].map(([name, qty]) => ({ name, qty }));
+  }, [items]);
+
+  /* Place a whole AI design plan at once.
+
+     addFurniture() can't just be called in a loop: it closes over `items`, so N
+     rapid calls all see the same empty room and compute the SAME free anchor —
+     which is why an AI plan used to dump every piece on one spot. Here we thread a
+     local `working` copy through the loop so each piece is placed against the ones
+     before it, and we spend a single Gemini call for the whole batch (its candidate
+     spots seed the search; geometry does the separating). */
+  const addFurnitureBatch = useCallback(
+    async (entries: { productId: string; qty: number }[]) => {
+      if (!projectId) return { added: 0, skipped: [] as string[] };
+
+      const queue: ProductDTO[] = [];
+      for (const e of entries) {
+        const p = products.find((x) => x.id === e.productId);
+        if (!p) continue;
+        for (let i = 0; i < Math.max(1, e.qty); i++) queue.push(p);
+      }
+      if (queue.length === 0) return { added: 0, skipped: [] as string[] };
+
+      const aspect = stage.w / Math.max(1, stage.h);
+      const obstacles: OBB[] = realObjects.map((b) => objectBoxToOBB(b, aspect, calib, depth));
+
+      setPlacing(true);
+
+      // One Gemini call for the batch: its candidate spots become seeds we cycle
+      // through, so pieces start in sensible, spread-out parts of the room.
+      let seeds: { ax: number; ay: number; facingDeg: number }[] = [];
+      const leadFloor = queue.find((p) => p.mount !== "ceiling");
+      try {
+        if (leadFloor && project?.photoUrl && stageRef.current) {
+          const shot = await captureComposite(stageRef.current, project.photoUrl);
+          const plan = await Promise.race([
+            api.place({
+              image: shot,
+              item: {
+                name: leadFloor.name,
+                category: leadFloor.category,
+                mount: "floor",
+                widthCm: leadFloor.widthCm,
+                depthCm: leadFloor.depthCm,
+                heightCm: leadFloor.heightCm,
+              },
+              placed: items.map((it) => {
+                const a = itemAnchor(it);
+                return { name: it.product.name, mount: it.product.mount, ax: a.ax, ay: a.ay };
+              }),
+            }),
+            new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout")), 25000)),
+          ]);
+          if (plan) {
+            seeds = [
+              { ax: plan.ax, ay: plan.ay, facingDeg: plan.facingDeg ?? 0 },
+              ...(plan.spots ?? []).map((s) => ({ ax: s.ax, ay: s.ay, facingDeg: s.facingDeg ?? 0 })),
+            ];
+          }
+        }
+      } catch {
+        seeds = []; // quota/timeout — geometry-only placement below still works
+      }
+
+      let working: PlacedItemDTO[] = [...items];
+      const skipped: string[] = [];
+      let added = 0;
+      let floorIndex = 0;
+
+      for (const product of queue) {
+        const ceiling = product.mount === "ceiling";
+        const region = ceiling ? CEILING_ANCHOR_BAND : FLOOR_REGION;
+        const samePlane = working.filter((it) => (it.product.mount === "ceiling") === ceiling);
+        const spec: FootprintSpec = {
+          widthCm: product.widthCm,
+          depthCm: product.depthCm,
+          scale: DEFAULT_SCALE,
+          yawDeg: (product.frontYaw ?? 0) + (depth?.roomYawDeg ?? 0),
+          mount: ceiling ? "ceiling" : "floor",
+        };
+
+        // Seed: cycle Gemini's candidates for floor pieces so they don't all start
+        // from the same point; ceiling fixtures spread along the ceiling band.
+        let start: { ax: number; ay: number };
+        let facing = 0;
+        if (ceiling) {
+          const n = samePlane.length;
+          start = ceilingAnchor(n === 0 ? 0.5 : 0.5 + (n % 2 === 1 ? 0.18 : -0.18) * Math.ceil(n / 2), CEILING_FALLBACK.posZ);
+        } else if (seeds.length) {
+          const seed = seeds[floorIndex % seeds.length];
+          floorIndex++;
+          start = { ax: seed.ax, ay: Math.min(0.94, Math.max(0.55, seed.ay)) };
+          facing = seed.facingDeg;
+        } else {
+          start = { ax: FLOOR_FALLBACK.posX, ay: FLOOR_FALLBACK.posZ };
+        }
+
+        const free =
+          findFreeAnchor(start.ax, start.ay, spec, samePlane, aspect, calib, depth, region, obstacles) ??
+          findFreeAnchor(start.ax, start.ay, spec, samePlane, aspect, calib, depth, region, []);
+        if (!free) {
+          // Genuinely no clear space left on this plane — report instead of stacking.
+          if (!skipped.includes(product.name)) skipped.push(product.name);
+          continue;
+        }
+
+        const placement = await api.addItem(projectId, product.id);
+        if (!placement) continue;
+        const pos = ceiling
+          ? ceilingAnchor(free.ax, free.ay)
+          : { ax: clampAnchor(free.ax), ay: clampAnchor(free.ay) };
+        const patch = { posX: pos.ax, posZ: pos.ay, rotationY: ceiling ? 0 : facing, scale: DEFAULT_SCALE };
+        const seated = { ...placement, ...patch };
+        working = [...working, seated];
+        added++;
+        setItems((prev) => [...prev, seated]);
+        api.updatePlacement(seated.id, patch).catch(() => {});
+      }
+
+      setPlacing(false);
+      if (skipped.length) {
+        setNoSpace({
+          title: "Not everything fit",
+          reason: `I placed what I could, but there wasn't clear floor space left for: ${skipped.join(", ")}. Remove a piece or try a smaller set.`,
+        });
+      }
+      return { added, skipped };
+    },
+    [projectId, items, products, project?.photoUrl, stage, calib, depth, realObjects],
+  );
+
   // Re-pack the whole room into a non-overlapping layout (pure geometry, no AI).
   // Fixes pieces placed before spacing existed, or after manual dragging.
   const rearrangeRoom = useCallback(async () => {
@@ -1008,7 +1151,7 @@ function Studio() {
           </div>
         </div>
 
-        {/* AI design chat — adds furniture from the marketplace */}
+        {/* AI design chat — reads the room, designs it from the marketplace */}
         <StudioChat
           products={products}
           onAdd={addFurniture}
@@ -1017,6 +1160,9 @@ function Studio() {
           onRoomEdited={onRoomEdited}
           onRevert={revertRoom}
           edited={!!(project?.originalPhotoUrl && project.originalPhotoUrl !== project.photoUrl)}
+          capture={captureStage}
+          placed={placedSummary}
+          onApplyPlan={addFurnitureBatch}
         />
 
         {/* Photorealistic render of the composited scene */}

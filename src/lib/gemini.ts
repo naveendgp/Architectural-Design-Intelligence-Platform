@@ -187,6 +187,158 @@ ${ceiling
   };
 }
 
+/* ── Design planner ───────────────────────────────────────────────────────────
+   Turns a free-form request ("convert this lift lobby into a modern office
+   waiting area, under ₹5 lakh") into a concrete list of catalog pieces. This is
+   the intent layer: the model sees the actual room photo AND the marketplace, so
+   it can judge what the space is, what it needs, and what actually fits. */
+
+export type CatalogEntry = {
+  id: string;
+  name: string;
+  category: string;
+  styleTags: string[];
+  priceInr: number;
+  widthCm: number | null;
+  depthCm: number | null;
+  heightCm: number | null;
+  mount: "floor" | "ceiling";
+};
+
+export type DesignPlanItem = { productId: string; qty: number; reason: string };
+
+export type DesignPlan = {
+  /** Short label of what the model understood, e.g. "Modern office waiting area". */
+  intent: string;
+  /** Conversational reply shown above the plan card. */
+  reply: string;
+  items: DesignPlanItem[];
+  /** Budget parsed out of the request, in rupees; 0 when none was given. */
+  budgetInr: number;
+  /** True when the request wasn't about furniture at all (chat falls back). */
+  offTopic: boolean;
+};
+
+const MAX_PLAN_LINES = 8;
+const MAX_QTY_PER_LINE = 6;
+
+/**
+ * Read a free-form design request against the real room photo and the real
+ * catalog, and return the pieces to add. Only ever returns ids that exist in
+ * `catalog`; quantities and budget are re-validated by the caller.
+ */
+export async function designPlan(
+  image: Buffer,
+  mimeType: string,
+  request: string,
+  catalog: CatalogEntry[],
+  placed: { name: string; qty: number }[],
+): Promise<DesignPlan> {
+  const catalogList = catalog
+    .map((p) => {
+      const dims = [p.widthCm && `${p.widthCm}w`, p.depthCm && `${p.depthCm}d`, p.heightCm && `${p.heightCm}h`]
+        .filter(Boolean)
+        .join("×");
+      const styles = p.styleTags.length ? ` [${p.styleTags.join("/")}]` : "";
+      return `- id=${p.id} | "${p.name}" | ${p.category} | ${p.mount}-mounted | ₹${p.priceInr}${dims ? ` | ${dims}cm` : ""}${styles}`;
+    })
+    .join("\n");
+
+  const placedList = placed.length
+    ? placed.map((p) => `- ${p.qty} × ${p.name}`).join("\n")
+    : "- (room is empty)";
+
+  const prompt = `You are an interior designer furnishing a real room from a real product catalog.
+
+THE ROOM: the attached photo is the actual space. Study it first — what kind of
+space is it (lobby, corridor, living room, office, bedroom)? How wide is the
+usable floor? Is it a narrow walkway or an open area? Where would people
+naturally sit, walk, or wait?
+
+ALREADY IN THE ROOM:
+${placedList}
+
+THE CATALOG — you may ONLY choose from these, using the exact id string:
+${catalogList}
+
+THE REQUEST: "${request}"
+
+Your job: understand what the user actually WANTS, then choose the pieces from
+the catalog that deliver it. The request is often a goal, not a shopping list —
+"convert this lift lobby into a modern office waiting area" means you decide that
+a waiting area needs seating, a side/coffee table, and some lighting, and you
+pick the specific catalog pieces that suit the space and style.
+
+RULES:
+- Choose real ids from the catalog above. Never invent an id or a product name.
+- Match the STYLE the user asked for (modern, classical, luxury, minimal) using
+  each product's style tags, and match the room you can see in the photo.
+- Respect the SPACE. Read the floor area in the photo and only specify what
+  physically fits with walking room left over. A narrow corridor or lift lobby
+  fits perhaps 2-4 small pieces against the walls — NOT a full living-room set.
+  Use each product's cm dimensions to judge this.
+- BUDGET: if the request names one (e.g. "under 5 lakhs", "₹2L", "50k"), convert
+  it to rupees in budgetInr (1 lakh = 100000) and keep the TOTAL of
+  price × qty at or under it. If no budget is mentioned, set budgetInr to 0.
+- Prefer a well-composed small set over quantity. Quantities must be sensible for
+  the space: at most ${MAX_QTY_PER_LINE} of any one piece, at most ${MAX_PLAN_LINES} distinct pieces.
+- Don't duplicate what the room already has unless the user asked for more.
+- Ceiling-mounted fixtures only make sense if the ceiling is visible in the photo.
+- reason: one short phrase per line saying why that piece (e.g. "seating for
+  waiting guests", "warm light over the seating").
+- reply: 1-2 friendly sentences describing the design you're proposing. Do NOT
+  list prices or quantities in the reply — the UI renders those separately.
+- intent: a 2-5 word label of what you understood, e.g. "Modern office waiting area".
+- offTopic: set true ONLY if the request has nothing to do with furnishing or
+  designing the room (e.g. "what's the weather"), and return no items.`;
+
+  const parsed = await generateJson(image, mimeType, prompt, {
+    type: "object",
+    properties: {
+      intent: { type: "string" },
+      reply: { type: "string" },
+      budgetInr: { type: "number", description: "rupees, 0 if not specified" },
+      offTopic: { type: "boolean" },
+      items: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            productId: { type: "string", description: "exact id from the catalog" },
+            qty: { type: "number" },
+            reason: { type: "string" },
+          },
+          required: ["productId", "qty"],
+        },
+      },
+    },
+    required: ["intent", "reply", "items", "offTopic"],
+  });
+
+  // Keep only ids that really exist, with sane quantities — the model is not
+  // trusted to respect its own limits.
+  const byId = new Map(catalog.map((p) => [p.id, p] as const));
+  const seen = new Set<string>();
+  const items: DesignPlanItem[] = [];
+  for (const raw of Array.isArray(parsed.items) ? parsed.items : []) {
+    const r = raw as { productId?: unknown; qty?: unknown; reason?: unknown };
+    const id = typeof r.productId === "string" ? r.productId : "";
+    if (!byId.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    const qty = Math.min(MAX_QTY_PER_LINE, Math.max(1, Math.round(Number(r.qty) || 1)));
+    items.push({ productId: id, qty, reason: typeof r.reason === "string" ? r.reason : "" });
+    if (items.length >= MAX_PLAN_LINES) break;
+  }
+
+  return {
+    intent: typeof parsed.intent === "string" ? parsed.intent : "",
+    reply: typeof parsed.reply === "string" ? parsed.reply : "",
+    items,
+    budgetInr: Math.max(0, Math.round(Number(parsed.budgetInr) || 0)),
+    offTopic: parsed.offTopic === true,
+  };
+}
+
 export type LightingInsight = {
   sufficient: boolean;
   recommended: number;

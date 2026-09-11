@@ -8,12 +8,31 @@ import { api } from "@/lib/api";
 import type { ProductDTO } from "@/lib/types";
 
 /* In-studio AI design chat.
-   - Furniture requests are parsed with a lightweight keyword matcher and placed via
-     the studio's add action.
+   - Design requests ("make this lobby a modern waiting area under ₹5 lakh") go to
+     the Gemini planner, which reads the room photo + the real catalog and proposes
+     a set of pieces. The proposal renders as a card the user can Apply.
+   - A plain "add <product>" skips the AI and places that piece immediately.
    - Room-edit requests (wallpaper, curtains, paint, flooring) are sent to Gemini
      image editing; the edited photo becomes the project's new base image. */
 
-type Msg = { id: number; role: "user" | "ai"; text: string; product?: ProductDTO; image?: string };
+export type PlanLine = { product: ProductDTO; qty: number; reason: string; subtotalInr: number };
+export type Plan = {
+  intent: string;
+  budgetInr: number;
+  totalInr: number;
+  trimmed: boolean;
+  items: PlanLine[];
+  applied?: boolean;
+};
+
+type Msg = {
+  id: number;
+  role: "user" | "ai";
+  text: string;
+  product?: ProductDTO;
+  image?: string;
+  plan?: Plan;
+};
 
 /** Detect a request to modify the room itself (surfaces), not add furniture. */
 function isRoomEdit(t: string): boolean {
@@ -23,52 +42,20 @@ function isRoomEdit(t: string): boolean {
   return feature && verb;
 }
 
-const CATEGORY_KEYWORDS: Record<string, string[]> = {
-  Seating: ["sofa", "couch", "chair", "armchair", "recliner", "loveseat", "seat", "seating", "bench", "stool"],
-  Tables: ["table", "desk", "console", "nightstand", "coffee table", "dining table"],
-  Lighting: ["lamp", "light", "lighting", "chandelier", "pendant", "sconce"],
-  Storage: ["shelf", "bookshelf", "cabinet", "storage", "sideboard", "dresser", "wardrobe", "drawer"],
-  Decor: ["rug", "carpet", "decor", "plant", "art", "mirror", "vase", "cushion"],
-};
-
-const NUMBER_WORDS: Record<string, number> = {
-  a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, couple: 2, few: 3, pair: 2,
-};
-
-function parseQty(t: string): number {
-  const digit = t.match(/\b([1-9])\b/);
-  if (digit) return Math.min(4, Number(digit[1]));
-  for (const [w, n] of Object.entries(NUMBER_WORDS)) {
-    if (new RegExp(`\\b${w}\\b`).test(t)) return Math.min(4, n);
+/* Fast path for an unambiguous single add ("add Arc Floor Lamp") so the suggestion
+   chips stay instant and don't spend a Gemini call. Anything with a goal, a budget,
+   a quantity or more than one item falls through to the planner — the old matcher
+   used to collapse "sofa, table, lights and lamps under 5 lakhs" into one product
+   and read the 5 as a quantity. */
+function directAdd(t: string, products: ProductDTO[]): ProductDTO | null {
+  if (!/^\s*(add|place|put|insert)\b/.test(t)) return null;
+  // Budget / goal / multi-item language means the planner should handle it.
+  if (/\b(and|also|plus|budget|under|below|within|lakhs?|crores?|₹|rs\.?|convert|turn|design|style|make)\b/.test(t)) {
+    return null;
   }
-  return 1;
-}
-
-function matchProduct(t: string, products: ProductDTO[]): ProductDTO | null {
-  let best: ProductDTO | null = null;
-  let bestScore = 0;
-  for (const p of products) {
-    let score = 0;
-    for (const word of p.name.toLowerCase().split(/\s+/)) {
-      if (word.length > 2 && t.includes(word)) score += 2;
-    }
-    const kws = CATEGORY_KEYWORDS[p.category] ?? [];
-    if (kws.some((k) => t.includes(k))) score += 1.5;
-    for (const s of p.styleTags) if (t.includes(s.toLowerCase())) score += 1;
-    if (score > bestScore) {
-      bestScore = score;
-      best = p;
-    }
-  }
-  return bestScore > 0 ? best : null;
-}
-
-function hasFurnitureWord(t: string, products: ProductDTO[]): boolean {
-  const inCats = Object.values(CATEGORY_KEYWORDS).some((ks) => ks.some((k) => t.includes(k)));
-  const inNames = products.some((p) =>
-    p.name.toLowerCase().split(/\s+/).some((w) => w.length > 2 && t.includes(w)),
-  );
-  return inCats || inNames;
+  if (/\b([2-9]|\d{2,})\b|\b(two|three|four|five|six|couple|few|pair|some|several)\b/.test(t)) return null;
+  const hits = products.filter((p) => t.includes(p.name.toLowerCase()));
+  return hits.length === 1 ? hits[0] : null;
 }
 
 export function StudioChat({
@@ -79,6 +66,9 @@ export function StudioChat({
   onRoomEdited,
   onRevert,
   edited,
+  capture,
+  placed,
+  onApplyPlan,
 }: {
   products: ProductDTO[];
   onAdd: (productId: string) => void;
@@ -87,12 +77,21 @@ export function StudioChat({
   onRoomEdited?: (newPhotoUrl: string) => void;
   onRevert?: () => Promise<void> | void;
   edited?: boolean;
+  /** Screenshot of the room as it looks now — the planner's view of the space. */
+  capture?: () => Promise<string>;
+  /** What's already in the room, so the planner doesn't duplicate it. */
+  placed?: { name: string; qty: number }[];
+  /** Place a whole plan at once, spaced apart. Returns what actually fit. */
+  onApplyPlan?: (
+    entries: { productId: string; qty: number }[],
+  ) => Promise<{ added: number; skipped: string[] }>;
 }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [busyLabel, setBusyLabel] = useState<string | undefined>();
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -136,6 +135,7 @@ export function StudioChat({
         return;
       }
       setBusy(true);
+      setBusyLabel("Editing the room… (~15–25s)");
       setTyping(true);
       try {
         const newUrl = await api.editRoom(projectId, photoUrl, raw);
@@ -166,6 +166,7 @@ export function StudioChat({
         ]);
       } finally {
         setBusy(false);
+        setBusyLabel(undefined);
       }
       return;
     }
@@ -185,33 +186,119 @@ export function StudioChat({
       return;
     }
 
-    const product = matchProduct(t, products);
-    if (product) {
-      const qty = parseQty(t);
-      for (let i = 0; i < qty; i++) onAdd(product.id);
+    // Unambiguous single add — place it straight away, no AI round-trip.
+    const direct = directAdd(t, products);
+    if (direct) {
+      onAdd(direct.id);
       reply({
-        text:
-          qty > 1
-            ? `Done — I've added ${qty} × ${product.name} to your room. They'll stack at the centre; drag them apart or ask for more.`
-            : `Done — I've placed a ${product.name} in your room and selected it. Drag to reposition, or ask for another piece.`,
-        product,
+        text: `Done — I've placed a ${direct.name} in your room and selected it. Drag to reposition, or tell me what you're going for and I'll design the whole space.`,
+        product: direct,
       });
       return;
     }
 
-    if (hasFurnitureWord(t, products)) {
-      reply({
-        text: `I couldn't find that in your marketplace. You have: ${products
-          .map((p) => p.name)
-          .join(", ")}. Try “add ${products[0].name}”.`,
-      });
-    } else {
-      reply({
-        text: `Tell me what to place — e.g. “add a sofa” or “add ${products[0].name}”. I'll pull it straight from your marketplace.`,
-      });
+    // Everything else is a design request: let Gemini read the room and the
+    // catalog and propose a set of pieces.
+    if (!capture || !onApplyPlan) {
+      reply({ text: "I can design this room once it's fully loaded — give it a moment and try again." });
+      return;
+    }
+
+    setBusy(true);
+    setBusyLabel("Designing your room… (~5–10s)");
+    setTyping(true);
+    try {
+      const shot = await capture();
+      const plan = await api.design({ image: shot, request: raw, placed: placed ?? [] });
+      setTyping(false);
+
+      if (plan.offTopic || plan.items.length === 0) {
+        setMessages((m) => [
+          ...m,
+          {
+            id: Date.now() + 1,
+            role: "ai",
+            text:
+              plan.reply ||
+              `Tell me what you'd like this space to become — e.g. “turn this into a modern office waiting area” — and I'll pick the pieces from your marketplace.`,
+          },
+        ]);
+        return;
+      }
+
+      setMessages((m) => [
+        ...m,
+        {
+          id: Date.now() + 1,
+          role: "ai",
+          text: plan.reply,
+          plan: {
+            intent: plan.intent,
+            budgetInr: plan.budgetInr,
+            totalInr: plan.totalInr,
+            trimmed: plan.trimmed,
+            items: plan.items,
+          },
+        },
+      ]);
+    } catch (e) {
+      setTyping(false);
+      const err = e as { code?: string };
+      setMessages((m) => [
+        ...m,
+        {
+          id: Date.now() + 1,
+          role: "ai",
+          text:
+            err.code === "quota"
+              ? "I've hit the Gemini rate limit. Wait a moment and ask again."
+              : err.code === "empty"
+                ? "Your marketplace is empty. Upload a 3D model in Settings → Upload 3D Model and I'll design with it."
+                : "I couldn't put a design together just now — the AI service may be busy. Please try again.",
+        },
+      ]);
+    } finally {
+      setBusy(false);
+      setBusyLabel(undefined);
     }
   };
 
+  /** Place every piece in a proposal, then report what actually fit. */
+  const applyPlan = async (msgId: number, plan: Plan) => {
+    if (!onApplyPlan || busy) return;
+    setBusy(true);
+    setBusyLabel("Placing your furniture…");
+    try {
+      const entries = plan.items.map((l) => ({ productId: l.product.id, qty: l.qty }));
+      const { added, skipped } = await onApplyPlan(entries);
+      setMessages((m) =>
+        m.map((msg) => (msg.id === msgId ? { ...msg, plan: { ...plan, applied: true } } : msg)),
+      );
+      const total = plan.items.reduce((n, l) => n + l.qty, 0);
+      setMessages((m) => [
+        ...m,
+        {
+          id: Date.now() + 1,
+          role: "ai",
+          text: skipped.length
+            ? `Placed ${added} of ${total} pieces, spaced around the room. There wasn't clear floor left for: ${skipped.join(", ")}. Drag things around, or ask me to swap something smaller in.`
+            : `Placed all ${added} pieces, spaced around the room. Drag anything to fine-tune, or hit Render Scene to see it photoreal.`,
+        },
+      ]);
+    } finally {
+      setBusy(false);
+      setBusyLabel(undefined);
+    }
+  };
+
+  const designActions =
+    capture && onApplyPlan
+      ? [
+          "Turn this into a modern office waiting area",
+          "Furnish this as a cosy living room under ₹2 lakh",
+          "Add enough seating and lighting for this space",
+        ]
+      : [];
   const restyleActions = onRoomEdited
     ? ["Change the wallpaper to warm beige", "Remove the curtains", "Change the flooring to wood"]
     : [];
@@ -297,8 +384,27 @@ export function StudioChat({
                   </div>
                   <p className="text-center font-semibold">How should we design this room?</p>
                   <p className="text-center text-[13px] text-muted mt-1 mb-4">
-                    Restyle the room or place furniture — just ask.
+                    Describe the space you want — I'll pick the furniture.
                   </p>
+
+                  {designActions.length > 0 && (
+                    <div className="mb-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-subtle mb-2 flex items-center gap-1.5">
+                        <Sparkles className="h-3 w-3" /> Design the space
+                      </p>
+                      <div className="space-y-1.5">
+                        {designActions.map((label) => (
+                          <button
+                            key={label}
+                            onClick={() => send(label)}
+                            className="w-full text-left px-3 py-2 rounded-xl border border-border bg-surface text-[13px] hover:border-primary/50 hover:bg-primary/5 transition-colors"
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {restyleActions.length > 0 && (
                     <div className="mb-4">
@@ -346,9 +452,14 @@ export function StudioChat({
               ) : (
                 <div className="space-y-4">
                   {messages.map((m) => (
-                    <Bubble key={m.id} msg={m} />
+                    <Bubble
+                      key={m.id}
+                      msg={m}
+                      busy={busy}
+                      onApply={m.plan ? () => applyPlan(m.id, m.plan!) : undefined}
+                    />
                   ))}
-                  {typing && <Typing label={busy ? "Editing the room… (~15–25s)" : undefined} />}
+                  {typing && <Typing label={busyLabel} />}
                   <div ref={endRef} />
                 </div>
               )}
@@ -388,7 +499,101 @@ export function StudioChat({
   );
 }
 
-function Bubble({ msg }: { msg: Msg }) {
+/* An AI proposal: what it understood, the pieces it picked, the cost against any
+   budget the user named, and a single action to place the lot. */
+function PlanCard({
+  plan,
+  busy,
+  onApply,
+}: {
+  plan: Plan;
+  busy: boolean;
+  onApply?: () => void;
+}) {
+  const pieces = plan.items.reduce((n, l) => n + l.qty, 0);
+  const overBudget = plan.budgetInr > 0 && plan.totalInr > plan.budgetInr;
+  return (
+    <div className="mt-2.5 rounded-2xl border border-border bg-surface overflow-hidden">
+      {plan.intent && (
+        <div className="flex items-center gap-1.5 px-3 pt-2.5 pb-1.5">
+          <Wand2 className="h-3 w-3 text-primary shrink-0" />
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-subtle truncate">
+            {plan.intent}
+          </p>
+        </div>
+      )}
+
+      <div className="px-1.5 pb-1.5 space-y-0.5">
+        {plan.items.map((line) => (
+          <div key={line.product.id} className="flex items-center gap-2.5 p-1.5 rounded-xl">
+            <span className="relative h-9 w-9 rounded-lg overflow-hidden shrink-0 bg-surface-muted">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={line.product.thumbnailUrl} alt="" className="h-full w-full object-cover" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="flex items-baseline gap-1.5">
+                <span className="text-[13px] font-medium truncate">{line.product.name}</span>
+                {line.qty > 1 && (
+                  <span className="text-[11px] text-muted shrink-0">× {line.qty}</span>
+                )}
+              </span>
+              {line.reason && (
+                <span className="block text-[11px] text-subtle truncate">{line.reason}</span>
+              )}
+            </span>
+            <span className="text-[11px] font-semibold text-muted shrink-0 pr-1">
+              {formatINR(line.subtotalInr)}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div className="px-3 py-2 border-t border-border/70 bg-surface-muted/40">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-[11px] text-subtle">
+            {pieces} piece{pieces === 1 ? "" : "s"}
+            {plan.budgetInr > 0 && ` · budget ${formatINR(plan.budgetInr)}`}
+          </span>
+          <span
+            className={cn(
+              "text-sm font-semibold",
+              overBudget ? "text-amber-500" : "text-foreground",
+            )}
+          >
+            {formatINR(plan.totalInr)}
+          </span>
+        </div>
+        {plan.trimmed && (
+          <p className="text-[11px] text-subtle mt-1">Trimmed to stay within your budget.</p>
+        )}
+
+        {plan.applied ? (
+          <p className="mt-2 text-[12px] font-medium text-emerald-500">✓ Added to your room</p>
+        ) : (
+          onApply && (
+            <button
+              onClick={onApply}
+              disabled={busy}
+              className="mt-2 w-full h-9 rounded-xl brand-gradient text-white text-[13px] font-semibold shadow-[var(--shadow-glow)] disabled:opacity-50 disabled:shadow-none transition-all active:scale-[0.98]"
+            >
+              {busy ? "Placing…" : "Add all to room"}
+            </button>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Bubble({
+  msg,
+  busy = false,
+  onApply,
+}: {
+  msg: Msg;
+  busy?: boolean;
+  onApply?: () => void;
+}) {
   const isUser = msg.role === "user";
   // User prompts sit right as subtle chips; the AI replies as clean editorial blocks
   // with a small gradient mark — no bright "chat app" bubbles.
@@ -408,6 +613,7 @@ function Bubble({ msg }: { msg: Msg }) {
       </span>
       <div className="max-w-[85%] min-w-0">
         <div className="text-sm leading-relaxed text-foreground">{msg.text}</div>
+        {msg.plan && <PlanCard plan={msg.plan} busy={busy} onApply={onApply} />}
         {msg.image && (
           <div className="mt-2 rounded-xl overflow-hidden border border-border w-full">
             {/* eslint-disable-next-line @next/next/no-img-element */}
