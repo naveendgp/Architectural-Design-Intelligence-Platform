@@ -25,6 +25,8 @@ export type Plan = {
   droppedForSpace?: string[];
   items: PlanLine[];
   applied?: boolean;
+  /** Optional flooring/wall restyle the planner thinks the look needs. */
+  surfaces?: { instruction: string; reason: string } | null;
 };
 
 /** A yes/no (or pick-one) prompt rendered as buttons, so the user never has to
@@ -86,7 +88,8 @@ export function StudioChat({
   onPendingPromptHandled,
 }: {
   products: ProductDTO[];
-  onAdd: (productId: string) => void;
+  /** Places one piece. Resolves false when the room has no space for it. */
+  onAdd: (productId: string) => void | Promise<{ ok: boolean } | void>;
   projectId?: string;
   photoUrl?: string;
   onRoomEdited?: (newPhotoUrl: string) => void;
@@ -120,6 +123,10 @@ export function StudioChat({
   const [busy, setBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState<string | undefined>();
   const endRef = useRef<HTMLDivElement>(null);
+  // Message ids must be unique: Date.now()+N collided when two messages were
+  // pushed within the same millisecond, duplicating React keys.
+  const idRef = useRef(0);
+  const nextId = () => ++idRef.current;
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -137,7 +144,7 @@ export function StudioChat({
     setTyping(true);
     setTimeout(() => {
       setTyping(false);
-      setMessages((m) => [...m, { id: Date.now() + 1, role: "ai", ...msg }]);
+      setMessages((m) => [...m, { id: nextId(), role: "ai", ...msg }]);
     }, 750);
   };
 
@@ -145,7 +152,7 @@ export function StudioChat({
     const raw = text.trim();
     if (!raw || busy) return;
     const t = raw.toLowerCase();
-    setMessages((m) => [...m, { id: Date.now(), role: "user", text: raw }]);
+    setMessages((m) => [...m, { id: nextId(), role: "user", text: raw }]);
     setInput("");
     setExpanded(true); // any new exchange pulls the conversation back into view
 
@@ -156,7 +163,7 @@ export function StudioChat({
       try {
         await onRevert();
         setTyping(false);
-        setMessages((m) => [...m, { id: Date.now() + 1, role: "ai", text: "Reverted the room to its original photo." }]);
+        setMessages((m) => [...m, { id: nextId(), role: "ai", text: "Reverted the room to its original photo." }]);
       } finally {
         setBusy(false);
         setTyping(false);
@@ -171,7 +178,7 @@ export function StudioChat({
         reply({ text: "I can edit the room once it's fully loaded — give it a moment and try again." });
         return;
       }
-      const id = Date.now() + 1;
+      const id = nextId();
       setTyping(true);
       setTimeout(() => {
         setTyping(false);
@@ -234,7 +241,7 @@ export function StudioChat({
         setMessages((m) => [
           ...m,
           {
-            id: Date.now() + 1,
+            id: nextId(),
             role: "ai",
             text: `Done — the room is repainted. This is now your base photo, so anything you add or render sits on the new look.`,
             image: newUrl,
@@ -246,7 +253,7 @@ export function StudioChat({
         setMessages((m) => [
           ...m,
           {
-            id: Date.now() + 1,
+            id: nextId(),
             role: "ai",
             text:
               err.code === "billing"
@@ -268,11 +275,30 @@ export function StudioChat({
     // Unambiguous single add — place it straight away, no AI round-trip.
     const direct = directAdd(t, products);
     if (direct) {
-      onAdd(direct.id);
-      reply({
-        text: `Done — I've placed a ${direct.name} in your room and selected it. Drag to reposition, or tell me what you're going for and I'll design the whole space.`,
-        product: direct,
-      });
+      setTyping(true);
+      const res = await onAdd(direct.id);
+      setTyping(false);
+      // Don't claim success when the room actually refused the piece.
+      if (res && res.ok === false) {
+        setMessages((m) => [
+          ...m,
+          {
+            id: nextId(),
+            role: "ai",
+            text: `There isn't clear floor space left for a ${direct.name}. Remove something first, or tell me the look you're after and I'll plan a set that fits.`,
+          },
+        ]);
+        return;
+      }
+      setMessages((m) => [
+        ...m,
+        {
+          id: nextId(),
+          role: "ai",
+          text: `Done — I've placed a ${direct.name} in your room and selected it. Drag to reposition, or tell me what you're going for and I'll design the whole space.`,
+          product: direct,
+        },
+      ]);
       return;
     }
 
@@ -302,7 +328,7 @@ export function StudioChat({
         setMessages((m) => [
           ...m,
           {
-            id: Date.now() + 1,
+            id: nextId(),
             role: "ai",
             text:
               plan.reply ||
@@ -336,7 +362,7 @@ export function StudioChat({
         setMessages((m) => [
           ...m,
           {
-            id: Date.now() + 1,
+            id: nextId(),
             role: "ai",
             text: "This room doesn't have clear floor space left for anything more. Remove a piece or two and ask me again, and I'll design around what's left.",
           },
@@ -348,7 +374,7 @@ export function StudioChat({
       setMessages((m) => [
         ...m,
         {
-          id: Date.now() + 1,
+          id: nextId(),
           role: "ai",
           text: plan.reply,
           plan: {
@@ -358,6 +384,7 @@ export function StudioChat({
             trimmed: plan.trimmed,
             droppedForSpace,
             items,
+            surfaces: plan.surfaces,
           },
         },
       ]);
@@ -367,7 +394,7 @@ export function StudioChat({
       setMessages((m) => [
         ...m,
         {
-          id: Date.now() + 1,
+          id: nextId(),
           role: "ai",
           text:
             err.code === "quota"
@@ -395,15 +422,45 @@ export function StudioChat({
         m.map((msg) => (msg.id === msgId ? { ...msg, plan: { ...plan, applied: true } } : msg)),
       );
       const total = plan.items.reduce((n, l) => n + l.qty, 0);
+      const placedText = skipped.length
+        ? `Placed ${added} of ${total} pieces, spaced around the room. There wasn't clear floor left for: ${skipped.join(", ")}. Drag things around, or ask me to swap something smaller in.`
+        : `Placed all ${added} pieces, spaced around the room. Drag anything to fine-tune, or hit Render Scene to see it photoreal.`;
+
+      // Furniture alone often can't land the look — offer the floor/wall restyle
+      // the planner suggested, as its own confirmable step.
+      const surfaces = plan.surfaces;
+      const canEdit = !!(projectId && photoUrl && onRoomEdited);
+      const followUpId = nextId();
       setMessages((m) => [
         ...m,
-        {
-          id: Date.now() + 1,
-          role: "ai",
-          text: skipped.length
-            ? `Placed ${added} of ${total} pieces, spaced around the room. There wasn't clear floor left for: ${skipped.join(", ")}. Drag things around, or ask me to swap something smaller in.`
-            : `Placed all ${added} pieces, spaced around the room. Drag anything to fine-tune, or hit Render Scene to see it photoreal.`,
-        },
+        { id: nextId(), role: "ai", text: placedText },
+        ...(surfaces && canEdit
+          ? [
+              {
+                id: followUpId,
+                role: "ai" as const,
+                text: `To finish the look I'd also restyle the room itself — ${surfaces.instruction.replace(/\.$/, "")}${surfaces.reason ? ` (${surfaces.reason})` : ""}. Want me to?`,
+                actions: [
+                  {
+                    label: "Yes, restyle it",
+                    primary: true,
+                    run: () => runRoomEdit(followUpId, surfaces.instruction),
+                  },
+                  {
+                    label: "No, keep it",
+                    run: () =>
+                      setMessages((mm) =>
+                        mm.map((msg) =>
+                          msg.id === followUpId
+                            ? { ...msg, chose: "Keeping the current floor and walls", actions: undefined }
+                            : msg,
+                        ),
+                      ),
+                  },
+                ],
+              },
+            ]
+          : []),
       ]);
     } finally {
       setBusy(false);
@@ -455,7 +512,7 @@ export function StudioChat({
                     setTyping(true);
                     try {
                       await onRevert();
-                      setMessages((m) => [...m, { id: Date.now(), role: "ai", text: "Reverted the room to its original photo." }]);
+                      setMessages((m) => [...m, { id: nextId(), role: "ai", text: "Reverted the room to its original photo." }]);
                     } finally {
                       setBusy(false);
                       setTyping(false);

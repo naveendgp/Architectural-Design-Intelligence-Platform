@@ -370,7 +370,7 @@ function Studio() {
 
   const addFurniture = useCallback(
     async (productId: string) => {
-      if (!projectId) return;
+      if (!projectId) return { ok: false as const, reason: "not-ready" as const };
       const product = products.find((p) => p.id === productId);
       const mount: "floor" | "ceiling" = product?.mount === "ceiling" ? "ceiling" : "floor";
       const ceiling = mount === "ceiling";
@@ -422,7 +422,7 @@ function Studio() {
             reason: `There isn't enough clear ${ceiling ? "ceiling" : "floor"} space for ${product.name}, even after rearranging. Remove a piece and try again.`,
           });
           setAddOpen(false);
-          return;
+          return { ok: false as const, reason: "no-space" as const };
         }
       }
 
@@ -551,6 +551,7 @@ function Studio() {
         api.updatePlacement(seated.id, patch).catch(() => {});
       }
       setAddOpen(false);
+      return { ok: true as const };
     },
     [projectId, items, products, project?.photoUrl, stage, calib, depth, realObjects],
   );

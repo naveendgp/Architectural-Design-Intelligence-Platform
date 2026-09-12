@@ -217,6 +217,9 @@ export type DesignPlan = {
   budgetInr: number;
   /** True when the request wasn't about furniture at all (chat falls back). */
   offTopic: boolean;
+  /** An optional flooring/wall restyle when the room's existing surfaces fight
+      the look being asked for. One combined instruction so it costs one edit. */
+  surfaces?: { instruction: string; reason: string };
 };
 
 const MAX_PLAN_LINES = 8;
@@ -311,6 +314,19 @@ RULES:
 - Ceiling-mounted fixtures only make sense if the ceiling is visible in the photo.
 - reason: one short phrase per line saying why that piece (e.g. "seating for
   waiting guests", "warm light over the seating").
+- SURFACES: furniture alone often can't deliver the look. Study the room's
+  existing flooring and walls in the photo. If they genuinely fight the style
+  being asked for (dated tiles under a "modern" brief, a colour that clashes),
+  propose a restyle in "surfaces":
+    - instruction: ONE plain-English sentence covering both changes you want,
+      e.g. "Change the flooring to warm oak planks and the walls to soft
+      off-white". Mention only what should actually change.
+    - reason: a short phrase on why it helps.
+  ONLY propose this when the request is about the room's overall look or purpose
+  ("make it modern", "turn this into a waiting area"). If the user asked for a
+  specific piece ("add a reading chair"), just add the piece — redecorating the
+  room is not what they asked for. Also leave it out when the existing floor and
+  walls already suit the brief.
 - reply: 1-2 friendly sentences describing the design you're proposing. Do NOT
   list prices or quantities in the reply — the UI renders those separately.
 - intent: a 2-5 word label of what you understood, e.g. "Modern office waiting area".
@@ -324,6 +340,14 @@ RULES:
       reply: { type: "string" },
       budgetInr: { type: "number", description: "rupees, 0 if not specified" },
       offTopic: { type: "boolean" },
+      surfaces: {
+        type: "object",
+        description: "Optional flooring/wall restyle; omit when not needed.",
+        properties: {
+          instruction: { type: "string" },
+          reason: { type: "string" },
+        },
+      },
       items: {
         type: "array",
         items: {
@@ -355,7 +379,17 @@ RULES:
     if (items.length >= MAX_PLAN_LINES) break;
   }
 
+  const rawSurfaces = parsed.surfaces as { instruction?: unknown; reason?: unknown } | undefined;
+  const surfaceInstruction =
+    rawSurfaces && typeof rawSurfaces.instruction === "string" ? rawSurfaces.instruction.trim() : "";
+
   return {
+    surfaces: surfaceInstruction
+      ? {
+          instruction: surfaceInstruction,
+          reason: typeof rawSurfaces?.reason === "string" ? rawSurfaces.reason : "",
+        }
+      : undefined,
     intent: typeof parsed.intent === "string" ? parsed.intent : "",
     reply: typeof parsed.reply === "string" ? parsed.reply : "",
     items,
