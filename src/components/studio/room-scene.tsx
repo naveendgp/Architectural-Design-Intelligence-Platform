@@ -165,12 +165,20 @@ function Furniture({
 function PointerLayer({
   registry,
   getCollidingIds,
+  items,
+  aspect,
+  calib,
+  depth,
   onSelect,
   onMove,
   onDrop,
 }: {
   registry: Registry;
   getCollidingIds: () => Set<string>;
+  items: PlacedItemDTO[];
+  aspect: number;
+  calib: Calibration;
+  depth: DepthField | null;
   onSelect: (id: string | null) => void;
   onMove: (id: string, ax: number, ay: number) => void;
   onDrop: (id: string) => void;
@@ -181,6 +189,11 @@ function PointerLayer({
   const dragId = useRef<string | null>(null);
   const grabOffset = useRef({ x: 0, y: 0 });
   const dragStartAnchor = useRef({ ax: 0, ay: 0 });
+  // Last position the dragged piece could legally occupy — it stops here instead
+  // of sliding through whatever it bumps into.
+  const lastGoodAnchor = useRef({ ax: 0, ay: 0 });
+  const sceneRef = useRef({ items, aspect, calib, depth });
+  sceneRef.current = { items, aspect, calib, depth };
 
   useEffect(() => {
     const el = gl.domElement;
@@ -220,6 +233,7 @@ function PointerLayer({
         const obj = registry.current.get(id);
         const a = (obj?.userData?.anchor as { ax: number; ay: number }) ?? FALLBACK_ANCHOR;
         dragStartAnchor.current = { ax: a.ax, ay: a.ay };
+        lastGoodAnchor.current = { ax: a.ax, ay: a.ay };
         const p = frac(ev);
         grabOffset.current = { x: p.ax - a.ax, y: p.ay - a.ay };
         document.body.style.cursor = "grabbing";
@@ -235,6 +249,37 @@ function PointerLayer({
         // the top of the photo must stop at the floor line, not climb the wall.
         const mount = obj?.userData?.mount === "ceiling" ? "ceiling" : "floor";
         const anchor = clampDragAnchor(ax, ay, mount);
+
+        /* Don't let a drag push one piece through another — but never trap a
+           piece either. The rule is "don't make it worse": a move is refused
+           only if it would overlap something it is NOT already overlapping. A
+           piece that starts out overlapping can always be dragged free, which a
+           plain "refuse any overlap" test made impossible — it pinned anything
+           already touching so it could not be moved at all. */
+        if (mount === "floor") {
+          const { items: its, aspect: asp, calib: cal, depth: dep } = sceneRef.current;
+          const me = its.find((it) => it.id === dragId.current);
+          if (me) {
+            const others = its.filter(
+              (o) => o.id !== me.id && o.product.mount !== "ceiling",
+            );
+            const hitting = (it: PlacedItemDTO) => {
+              const box = itemOBB(it, asp, cal, dep);
+              return new Set(
+                others.filter((o) => obbOverlap(box, itemOBB(o, asp, cal, dep))).map((o) => o.id),
+              );
+            };
+            const before = hitting(me);
+            const after = hitting({ ...me, posX: anchor.ax, posZ: anchor.ay });
+            const madeWorse = [...after].some((id) => !before.has(id));
+            if (madeWorse) {
+              onMove(dragId.current, lastGoodAnchor.current.ax, lastGoodAnchor.current.ay);
+              return;
+            }
+          }
+          lastGoodAnchor.current = { ax: anchor.ax, ay: anchor.ay };
+        }
+
         onMove(dragId.current, anchor.ax, anchor.ay);
       } else {
         document.body.style.cursor = pick(ev) ? "grab" : "auto";
@@ -288,8 +333,17 @@ function CollisionChecker({
   const prevKey = useRef("");
 
   useEffect(() => {
+    /* Warn on real interpenetration, not on tight clearance. A footprint box is a
+       rectangle around a shape that often isn't one — a curved sofa's box claims
+       corners the sofa never occupies — so testing the raw boxes lights up pieces
+       that plainly have a gap. Placement still reserves the full box; only this
+       warning is inset. */
+    const INSET = 0.88;
     const floor = items.filter((it) => it.product.mount !== "ceiling");
-    const boxes = floor.map((it) => [it.id, itemOBB(it, aspect, calib, depth)] as const);
+    const boxes = floor.map((it) => {
+      const o = itemOBB(it, aspect, calib, depth);
+      return [it.id, { ...o, hw: o.hw * INSET, hd: o.hd * INSET }] as const;
+    });
 
     const colliding = new Set<string>();
     for (let i = 0; i < boxes.length; i++) {
@@ -429,6 +483,10 @@ function SceneContent({
       <PointerLayer
         registry={registry}
         getCollidingIds={() => collidingIdsRef.current}
+        items={items}
+        aspect={aspect}
+        calib={calib}
+        depth={depth}
         onSelect={onSelect}
         onMove={onMove}
         onDrop={onDrop}
