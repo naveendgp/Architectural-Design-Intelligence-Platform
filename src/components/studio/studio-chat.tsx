@@ -143,6 +143,16 @@ export function StudioChat({
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, typing, expanded]);
 
+  /* If the user collapses the panel while the AI is working, pop it back open
+     when the answer lands — otherwise the result arrives unseen. */
+  const lastSeen = useRef(0);
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== "ai" || last.id === lastSeen.current) return;
+    lastSeen.current = last.id;
+    setExpanded(true);
+  }, [messages]);
+
   // The "+" menu can hand us a prompt (a flooring or wall preset); run it once.
   const sendRef = useRef<(t: string) => void>(() => {});
   useEffect(() => {
@@ -576,6 +586,9 @@ export function StudioChat({
         : `Placed all ${added} pieces, spaced around the room. Drag anything to fine-tune, or hit Render Scene to see it photoreal.`;
 
       setMessages((m) => [...m, { id: nextId(), role: "ai", text: placedText }]);
+      /* The furniture is in — the room is the thing worth looking at now, and the
+         panel covers it. Collapse after a beat so the message is still readable. */
+      setTimeout(() => setExpanded(false), 2600);
     } finally {
       setBusy(false);
       setBusyLabel(undefined);

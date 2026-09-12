@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Canvas, useThree, useFrame } from "@react-three/fiber";
+import { Canvas, useThree } from "@react-three/fiber";
 import { useGLTF, Clone, Environment, Shadow } from "@react-three/drei";
 import * as THREE from "three";
 import type { PlacedItemDTO } from "@/lib/types";
@@ -10,6 +10,8 @@ import {
   type Calibration,
   clamp01,
   clampDragAnchor,
+  itemOBB,
+  obbOverlap,
   itemAnchor,
   itemWorldPos,
   FALLBACK_ANCHOR,
@@ -251,49 +253,48 @@ function PointerLayer({
 
 /* ── Collision detection ─────────────────────────────────────────────── */
 
+/* Collision is decided with the SAME oriented-box maths the placement engine
+   uses, so the red ring can never contradict where the packer chose to put a
+   piece. The old version bounded each object's whole Three.js group with an
+   axis-aligned Box3 — which swallowed the decorative drei <Shadow>, a SQUARE
+   plane scaled 2.2x the largest dimension. For a 220x78cm sofa that produced a
+   2.4m square box, about 3x its real depth, and flagged pieces that were plainly
+   far apart. */
 function CollisionChecker({
-  registry,
+  items,
+  aspect,
+  calib,
+  depth,
   onUpdate,
 }: {
-  registry: Registry;
+  items: PlacedItemDTO[];
+  aspect: number;
+  calib: Calibration;
+  depth: DepthField | null;
   onUpdate: (ids: Set<string>) => void;
 }) {
-  const frameCount = useRef(0);
   const prevKey = useRef("");
 
-  useFrame(() => {
-    // Throttle: check every 4 frames (~15 Hz at 60 fps).
-    if (++frameCount.current % 4 !== 0) return;
-
-    const entries: [string, THREE.Box3][] = [];
-    for (const [id, obj] of registry.current) {
-      const box = new THREE.Box3().setFromObject(obj);
-      // Shrink the box slightly (10%) to avoid false positives from
-      // selection rings and shadows that pad the bounding volume.
-      const shrink = new THREE.Vector3();
-      box.getSize(shrink).multiplyScalar(0.05);
-      box.min.add(shrink);
-      box.max.sub(shrink);
-      entries.push([id, box]);
-    }
+  useEffect(() => {
+    const floor = items.filter((it) => it.product.mount !== "ceiling");
+    const boxes = floor.map((it) => [it.id, itemOBB(it, aspect, calib, depth)] as const);
 
     const colliding = new Set<string>();
-    for (let i = 0; i < entries.length; i++) {
-      for (let j = i + 1; j < entries.length; j++) {
-        if (entries[i][1].intersectsBox(entries[j][1])) {
-          colliding.add(entries[i][0]);
-          colliding.add(entries[j][0]);
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        if (obbOverlap(boxes[i][1], boxes[j][1])) {
+          colliding.add(boxes[i][0]);
+          colliding.add(boxes[j][0]);
         }
       }
     }
 
-    // Only trigger a state update when the set actually changes.
     const key = [...colliding].sort().join(",");
     if (key !== prevKey.current) {
       prevKey.current = key;
       onUpdate(colliding);
     }
-  });
+  }, [items, aspect, calib, depth, onUpdate]);
 
   return null;
 }
@@ -420,7 +421,13 @@ function SceneContent({
         onMove={onMove}
         onDrop={onDrop}
       />
-      <CollisionChecker registry={registry} onUpdate={handleCollisionUpdate} />
+      <CollisionChecker
+        items={items}
+        aspect={aspect}
+        calib={calib}
+        depth={depth}
+        onUpdate={handleCollisionUpdate}
+      />
       <ambientLight intensity={0.8} />
       <directionalLight position={[3, 8, 4]} intensity={1.2} />
 
