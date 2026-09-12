@@ -73,6 +73,8 @@ export function StudioChat({
   capacity,
   onFitPlan,
   onApplyPlan,
+  tools,
+  roomEmpty,
 }: {
   products: ProductDTO[];
   onAdd: (productId: string) => void;
@@ -93,6 +95,10 @@ export function StudioChat({
   onApplyPlan?: (
     entries: { productId: string; qty: number }[],
   ) => Promise<{ added: number; skipped: string[] }>;
+  /** Manual tools, rendered inside the bar behind a "+" so they don't take a row. */
+  tools?: React.ReactNode;
+  /** Openers are only worth screen space while the room is still empty. */
+  roomEmpty?: boolean;
 }) {
   // The bar is always docked; `expanded` only controls the conversation above it.
   const [expanded, setExpanded] = useState(true);
@@ -423,8 +429,9 @@ export function StudioChat({
         )}
       </AnimatePresence>
 
-      {/* Suggestions — shown before the first message, so the bar reads as capable */}
-      {empty && suggestions.length > 0 && (
+      {/* Openers — only while the room is still empty and nothing has been asked,
+          so they stop competing with the room once work is under way. */}
+      {empty && roomEmpty && suggestions.length > 0 && (
         <div className="pointer-events-auto w-[min(780px,100%)] flex flex-wrap justify-center gap-1.5">
           {suggestions.map((s) => (
             <button
@@ -442,9 +449,11 @@ export function StudioChat({
       {/* The prompt bar itself — the widest, most prominent control on screen */}
       <div className="pointer-events-auto w-[min(780px,100%)]">
         <div className="flex items-end gap-2 pl-3 pr-2 py-2 rounded-[20px] bg-surface/95 backdrop-blur-2xl border border-border shadow-[var(--shadow-lg)] focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10 transition-all">
-          <span className="grid place-items-center h-9 w-9 rounded-full brand-gradient text-white shrink-0">
-            <Sparkles className="h-[18px] w-[18px]" />
+          <span className="grid place-items-center h-8 w-8 rounded-full brand-gradient text-white shrink-0">
+            <Sparkles className="h-4 w-4" />
           </span>
+
+          {tools}
 
           <textarea
             rows={1}

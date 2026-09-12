@@ -123,6 +123,8 @@ function Studio() {
   // the deterministic engine must avoid when placing new pieces.
   const [realObjects, setRealObjects] = useState<FloorObjectBox[]>([]);
   const [measureMenuOpen, setMeasureMenuOpen] = useState(false);
+  // Manual tools live behind the AI bar's "+" so the room isn't walled in by chrome.
+  const [toolsOpen, setToolsOpen] = useState(false);
 
   // Calibration (incl. furniture size) persists per project so fixes stick.
   useEffect(() => {
@@ -1110,134 +1112,9 @@ function Studio() {
           </div>
         )}
 
-        {/* Bottom cluster: manual tools stacked above the AI bar. One flow column
-            so the suggestion chips can never overlap the dock, and the AI prompt
-            always reads as the widest, most prominent control in the studio. */}
+        {/* Bottom cluster — ONE row, so the room stays the hero. The AI bar is the
+            only permanent control; the manual tools live behind its "+" menu. */}
         <div className="absolute inset-x-0 bottom-4 z-30 flex flex-col items-center gap-2 px-4 pointer-events-none">
-          <div className="glass border border-border rounded-xl shadow-[var(--shadow-lg)] px-1.5 py-1.5 flex items-center gap-0.5 scale-90 origin-bottom pointer-events-auto">
-            <button
-              onClick={() => {
-                setAddFilter("all");
-                setAddOpen(true);
-              }}
-              className="flex items-center gap-2 h-11 px-3.5 rounded-xl hover:bg-surface-muted transition-colors text-sm font-medium"
-            >
-              <Plus className="h-5 w-5 text-primary" />
-              <span className="hidden md:block">Add Furniture</span>
-            </button>
-            <div className="relative">
-              <button
-                onClick={() => setMeasureMenuOpen((m) => !m)}
-                title="Measurement options"
-                aria-pressed={measureMenuOpen}
-                className={cn(
-                  "flex items-center gap-2 h-11 px-3.5 rounded-xl transition-colors text-sm font-medium",
-                  measureMenuOpen
-                    ? "bg-primary/10 text-primary"
-                    : "hover:bg-surface-muted",
-                )}
-              >
-                <Ruler className={cn("h-5 w-5", measureMenuOpen && "text-primary")} />
-                <span className="hidden md:block">Measure</span>
-              </button>
-
-              <AnimatePresence>
-                {measureMenuOpen && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                    className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-72 bg-white dark:bg-zinc-900 border border-border rounded-2xl shadow-[var(--shadow-lg)] p-4 space-y-5"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-semibold">Product dimensions</span>
-                      <Toggle
-                        checked={measureConfig.productDims}
-                        onChange={(c) => setMeasureConfig(m => ({ ...m, productDims: c }))}
-                      />
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-semibold">Product spacing</span>
-                      <Toggle
-                        checked={measureConfig.productSpacing}
-                        onChange={(c) => setMeasureConfig(m => ({ ...m, productSpacing: c }))}
-                      />
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-semibold">Room dimensions</span>
-                      <Toggle
-                        checked={measureConfig.roomDims}
-                        onChange={(c) => setMeasureConfig(m => ({ ...m, roomDims: c }))}
-                      />
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-semibold">
-                        Detected objects
-                        {realObjects.length > 0 ? ` (${realObjects.length})` : ""}
-                      </span>
-                      <Toggle checked={showDetected} onChange={setShowDetected} />
-                    </div>
-                    <div className="flex items-center justify-between pt-4 border-t border-border">
-                      <span className="text-sm font-semibold">Unit</span>
-                      <div className="flex w-32 bg-surface-muted rounded-xl border border-border p-1">
-                        <button
-                          onClick={() => setMeasureConfig(m => ({ ...m, unit: "ft" }))}
-                          className={cn(
-                            "flex-1 h-8 text-xs font-bold rounded-lg transition-all",
-                            measureConfig.unit === "ft" ? "bg-white dark:bg-zinc-800 shadow-sm text-foreground" : "text-muted hover:text-foreground"
-                          )}
-                        >
-                          ft
-                        </button>
-                        <button
-                          onClick={() => setMeasureConfig(m => ({ ...m, unit: "cm" }))}
-                          className={cn(
-                            "flex-1 h-8 text-xs font-bold rounded-lg transition-all",
-                            measureConfig.unit === "cm" ? "bg-white dark:bg-zinc-800 shadow-sm text-foreground" : "text-muted hover:text-foreground"
-                          )}
-                        >
-                          cm
-                        </button>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-            <button
-              onClick={() => {
-                setAddFilter("ceiling");
-                setAddOpen(true);
-              }}
-              title="Add a ceiling light"
-              className="flex items-center gap-2 h-11 px-3.5 rounded-xl hover:bg-surface-muted transition-colors text-sm font-medium"
-            >
-              <Lightbulb className="h-5 w-5" />
-              <span className="hidden md:block">Lights</span>
-            </button>
-            <button
-              onClick={rearrangeRoom}
-              disabled={rearranging || items.length < 2}
-              title="Auto-arrange the room so nothing overlaps"
-              className="flex items-center gap-2 h-11 px-3.5 rounded-xl hover:bg-surface-muted transition-colors text-sm font-medium disabled:opacity-40 disabled:hover:bg-transparent"
-            >
-              {rearranging ? (
-                <Loader2 className="h-5 w-5 animate-spin text-primary" />
-              ) : (
-                <Shuffle className="h-5 w-5" />
-              )}
-              <span className="hidden md:block">Arrange</span>
-            </button>
-            <button
-              title="Change wall design (coming soon)"
-              className="flex items-center gap-2 h-11 px-3.5 rounded-xl text-muted hover:bg-surface-muted transition-colors text-sm font-medium"
-            >
-              <Paintbrush className="h-5 w-5" />
-              <span className="hidden md:block">Walls</span>
-            </button>
-          </div>
-
-          {/* AI design bar — reads the room, designs it from the marketplace */}
           <StudioChat
             products={products}
             onAdd={addFurniture}
@@ -1251,6 +1128,163 @@ function Studio() {
             capacity={roomCapacity}
             onFitPlan={fitPlan}
             onApplyPlan={addFurnitureBatch}
+            roomEmpty={items.length === 0}
+            tools={
+              <div className="relative shrink-0">
+                {(toolsOpen || measureMenuOpen) && (
+                  <button
+                    aria-label="Close tools"
+                    onClick={() => {
+                      setToolsOpen(false);
+                      setMeasureMenuOpen(false);
+                    }}
+                    className="fixed inset-0 z-0 cursor-default"
+                  />
+                )}
+                <button
+                  onClick={() => {
+                    if (measureMenuOpen) setMeasureMenuOpen(false);
+                    setToolsOpen((o) => !o);
+                  }}
+                  title="Tools"
+                  aria-label="Tools"
+                  aria-expanded={toolsOpen}
+                  className={cn(
+                    "relative z-10 grid place-items-center h-9 w-9 rounded-xl transition-colors",
+                    toolsOpen || measureMenuOpen
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted hover:bg-surface-muted hover:text-foreground",
+                  )}
+                >
+                  <Plus className={cn("h-5 w-5 transition-transform", toolsOpen && "rotate-45")} />
+                </button>
+
+                <AnimatePresence>
+                  {/* Measure options replace the tool list rather than nesting. */}
+                  {measureMenuOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 8, scale: 0.97 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 8, scale: 0.97 }}
+                      className="absolute bottom-full left-0 z-10 mb-2 w-72 bg-white dark:bg-zinc-900 border border-border rounded-2xl shadow-[var(--shadow-lg)] p-4 space-y-4"
+                    >
+                      <button
+                        onClick={() => {
+                          setMeasureMenuOpen(false);
+                          setToolsOpen(true);
+                        }}
+                        className="flex items-center gap-1.5 text-xs font-medium text-muted hover:text-foreground transition-colors"
+                      >
+                        <ChevronLeft className="h-3.5 w-3.5" /> Tools
+                      </button>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-semibold">Product dimensions</span>
+                        <Toggle
+                          checked={measureConfig.productDims}
+                          onChange={(c) => setMeasureConfig(m => ({ ...m, productDims: c }))}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-semibold">Product spacing</span>
+                        <Toggle
+                          checked={measureConfig.productSpacing}
+                          onChange={(c) => setMeasureConfig(m => ({ ...m, productSpacing: c }))}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-semibold">Room dimensions</span>
+                        <Toggle
+                          checked={measureConfig.roomDims}
+                          onChange={(c) => setMeasureConfig(m => ({ ...m, roomDims: c }))}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-semibold">
+                          Detected objects
+                          {realObjects.length > 0 ? ` (${realObjects.length})` : ""}
+                        </span>
+                        <Toggle checked={showDetected} onChange={setShowDetected} />
+                      </div>
+                      <div className="flex items-center justify-between pt-3 border-t border-border">
+                        <span className="text-sm font-semibold">Unit</span>
+                        <div className="flex w-32 bg-surface-muted rounded-xl border border-border p-1">
+                          <button
+                            onClick={() => setMeasureConfig(m => ({ ...m, unit: "ft" }))}
+                            className={cn(
+                              "flex-1 h-8 text-xs font-bold rounded-lg transition-all",
+                              measureConfig.unit === "ft" ? "bg-white dark:bg-zinc-800 shadow-sm text-foreground" : "text-muted hover:text-foreground"
+                            )}
+                          >
+                            ft
+                          </button>
+                          <button
+                            onClick={() => setMeasureConfig(m => ({ ...m, unit: "cm" }))}
+                            className={cn(
+                              "flex-1 h-8 text-xs font-bold rounded-lg transition-all",
+                              measureConfig.unit === "cm" ? "bg-white dark:bg-zinc-800 shadow-sm text-foreground" : "text-muted hover:text-foreground"
+                            )}
+                          >
+                            cm
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {toolsOpen && !measureMenuOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 8, scale: 0.97 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 8, scale: 0.97 }}
+                      className="absolute bottom-full left-0 z-10 mb-2 w-56 bg-white dark:bg-zinc-900 border border-border rounded-2xl shadow-[var(--shadow-lg)] p-1.5"
+                    >
+                      <ToolItem
+                        icon={<Plus className="h-4 w-4 text-primary" />}
+                        label="Add furniture"
+                        onClick={() => {
+                          setAddFilter("all");
+                          setAddOpen(true);
+                          setToolsOpen(false);
+                        }}
+                      />
+                      <ToolItem
+                        icon={<Lightbulb className="h-4 w-4" />}
+                        label="Add a ceiling light"
+                        onClick={() => {
+                          setAddFilter("ceiling");
+                          setAddOpen(true);
+                          setToolsOpen(false);
+                        }}
+                      />
+                      <ToolItem
+                        icon={rearranging ? <Loader2 className="h-4 w-4 animate-spin text-primary" /> : <Shuffle className="h-4 w-4" />}
+                        label="Auto-arrange room"
+                        disabled={rearranging || items.length < 2}
+                        onClick={() => {
+                          setToolsOpen(false);
+                          rearrangeRoom();
+                        }}
+                      />
+                      <ToolItem
+                        icon={<Ruler className="h-4 w-4" />}
+                        label="Measurements"
+                        onClick={() => {
+                          setToolsOpen(false);
+                          setMeasureMenuOpen(true);
+                        }}
+                      />
+                      <ToolItem
+                        icon={<Paintbrush className="h-4 w-4" />}
+                        label="Wall design"
+                        hint="Soon"
+                        disabled
+                        onClick={() => {}}
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            }
           />
         </div>
 
@@ -2007,6 +2041,33 @@ function NoProject() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** One row in the AI bar's "+" tool menu. */
+function ToolItem({
+  icon,
+  label,
+  hint,
+  disabled,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  hint?: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="w-full flex items-center gap-2.5 h-10 px-2.5 rounded-xl text-left text-sm font-medium hover:bg-surface-muted transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+    >
+      <span className="grid place-items-center h-5 w-5 shrink-0">{icon}</span>
+      <span className="flex-1 truncate">{label}</span>
+      {hint && <span className="text-[10px] font-semibold uppercase tracking-wide text-subtle shrink-0">{hint}</span>}
+    </button>
   );
 }
 
