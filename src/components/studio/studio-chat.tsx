@@ -224,19 +224,21 @@ export function StudioChat({
 
   sendRef.current = send;
 
-  /** Actually perform a confirmed room edit. */
-  const runRoomEdit = async (msgId: number, instruction: string) => {
-    if (!projectId || !photoUrl || !onRoomEdited || busy) return;
+  /** Actually perform a confirmed room edit. Resolves true when the photo changed. */
+  const runRoomEdit = async (msgId: number, instruction: string): Promise<boolean> => {
+    if (!projectId || !photoUrl || !onRoomEdited || busy) return false;
     setMessages((m) =>
       m.map((msg) => (msg.id === msgId ? { ...msg, chose: "Making the change", actions: undefined } : msg)),
     );
     setBusy(true);
     setBusyLabel("Repainting the room… (~15–25s)");
     setTyping(true);
+    let ok = false;
     {
       try {
         const newUrl = await api.editRoom(projectId, photoUrl, instruction);
         onRoomEdited(newUrl);
+        ok = true;
         setTyping(false);
         setMessages((m) => [
           ...m,
@@ -266,6 +268,56 @@ export function StudioChat({
         setBusyLabel(undefined);
       }
     }
+    return ok;
+  };
+
+  /* Room first, furniture second. After the repaint the photo is new, so the
+     studio re-runs its room analysis — wait for that before placing, otherwise
+     the layout is packed against the floor of a room that no longer exists. */
+  const restyleThenFurnish = async (msgId: number, plan: Plan, instruction: string) => {
+    setMessages((m) =>
+      m.map((x) => (x.id === msgId ? { ...x, chose: "Restyling the room first", actions: undefined } : x)),
+    );
+    const ok = await runRoomEdit(msgId, instruction);
+    if (!ok) return;
+
+    setBusy(true);
+    setBusyLabel("Re-reading the new room…");
+    setTyping(true);
+    await new Promise((r) => setTimeout(r, 3500));
+    setTyping(false);
+    setBusy(false);
+    setBusyLabel(undefined);
+
+    const nextMsgId = nextId();
+    setMessages((m) => [
+      ...m,
+      {
+        id: nextMsgId,
+        role: "ai",
+        text: "Room's done. Ready to place the furniture into it?",
+        plan,
+        actions: [
+          {
+            label: "Add the furniture",
+            primary: true,
+            run: () => {
+              setMessages((mm) =>
+                mm.map((x) => (x.id === nextMsgId ? { ...x, chose: "Placing", actions: undefined } : x)),
+              );
+              applyPlan(nextMsgId, plan);
+            },
+          },
+          {
+            label: "Not now",
+            run: () =>
+              setMessages((mm) =>
+                mm.map((x) => (x.id === nextMsgId ? { ...x, chose: "Left the room empty", actions: undefined } : x)),
+              ),
+          },
+        ],
+      },
+    ]);
   };
 
   /** Place a single named piece, or ask Gemini to design the whole space. */
@@ -371,21 +423,55 @@ export function StudioChat({
       }
 
       const totalInr = items.reduce((n, l) => n + l.subtotalInr, 0);
+      const surfaces = plan.surfaces;
+      const canEdit = !!(projectId && photoUrl && onRoomEdited);
+      const msgId = nextId();
+      const planData: Plan = {
+        intent: plan.intent,
+        budgetInr: plan.budgetInr,
+        totalInr,
+        trimmed: plan.trimmed,
+        droppedForSpace,
+        items,
+        surfaces,
+      };
+
+      /* Order matters: finish the room, THEN furnish it. Placing first meant the
+         layout was computed against the old room and the user watched furniture
+         appear before the walls and floor caught up. */
       setMessages((m) => [
         ...m,
         {
-          id: nextId(),
+          id: msgId,
           role: "ai",
-          text: plan.reply,
-          plan: {
-            intent: plan.intent,
-            budgetInr: plan.budgetInr,
-            totalInr,
-            trimmed: plan.trimmed,
-            droppedForSpace,
-            items,
-            surfaces: plan.surfaces,
-          },
+          text:
+            surfaces && canEdit
+              ? `${plan.reply}\n\nI'd do the room first — ${surfaces.instruction.replace(/\.$/, "")}${surfaces.reason ? ` (${surfaces.reason})` : ""} — and then place these pieces into it.`
+              : plan.reply,
+          plan: planData,
+          // With a restyle to do first, the card's own Add button is replaced by
+          // an explicit ordered choice.
+          actions:
+            surfaces && canEdit
+              ? [
+                  {
+                    label: "Restyle the room first",
+                    primary: true,
+                    run: () => restyleThenFurnish(msgId, planData, surfaces.instruction),
+                  },
+                  {
+                    label: "Just add the furniture",
+                    run: () => {
+                      setMessages((mm) =>
+                        mm.map((x) =>
+                          x.id === msgId ? { ...x, chose: "Adding furniture only", actions: undefined } : x,
+                        ),
+                      );
+                      applyPlan(msgId, planData);
+                    },
+                  },
+                ]
+              : undefined,
         },
       ]);
     } catch (e) {
@@ -426,42 +512,7 @@ export function StudioChat({
         ? `Placed ${added} of ${total} pieces, spaced around the room. There wasn't clear floor left for: ${skipped.join(", ")}. Drag things around, or ask me to swap something smaller in.`
         : `Placed all ${added} pieces, spaced around the room. Drag anything to fine-tune, or hit Render Scene to see it photoreal.`;
 
-      // Furniture alone often can't land the look — offer the floor/wall restyle
-      // the planner suggested, as its own confirmable step.
-      const surfaces = plan.surfaces;
-      const canEdit = !!(projectId && photoUrl && onRoomEdited);
-      const followUpId = nextId();
-      setMessages((m) => [
-        ...m,
-        { id: nextId(), role: "ai", text: placedText },
-        ...(surfaces && canEdit
-          ? [
-              {
-                id: followUpId,
-                role: "ai" as const,
-                text: `To finish the look I'd also restyle the room itself — ${surfaces.instruction.replace(/\.$/, "")}${surfaces.reason ? ` (${surfaces.reason})` : ""}. Want me to?`,
-                actions: [
-                  {
-                    label: "Yes, restyle it",
-                    primary: true,
-                    run: () => runRoomEdit(followUpId, surfaces.instruction),
-                  },
-                  {
-                    label: "No, keep it",
-                    run: () =>
-                      setMessages((mm) =>
-                        mm.map((msg) =>
-                          msg.id === followUpId
-                            ? { ...msg, chose: "Keeping the current floor and walls", actions: undefined }
-                            : msg,
-                        ),
-                      ),
-                  },
-                ],
-              },
-            ]
-          : []),
-      ]);
+      setMessages((m) => [...m, { id: nextId(), role: "ai", text: placedText }]);
     } finally {
       setBusy(false);
       setBusyLabel(undefined);
