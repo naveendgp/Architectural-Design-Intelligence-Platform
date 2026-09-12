@@ -320,7 +320,7 @@ export function floorCapacity(
   calib: Calibration,
   depth: DepthField | null,
   obstacles: OBB[] = [],
-  region: Region = FLOOR_REGION,
+  region: Region = floorRegion(),
 ): { totalM2: number; freeM2: number } {
   const corners: { x: number; z: number }[] = [
     groundXZ(region.minX, region.minY, "floor", aspect, calib, depth),
@@ -413,6 +413,31 @@ export type Region = { minX: number; maxX: number; minY: number; maxY: number };
 export const FLOOR_REGION: Region = { minX: 0.1, maxX: 0.9, minY: 0.64, maxY: 0.92 };
 
 /**
+ * The floor this particular room actually has.
+ *
+ * FLOOR_REGION above is a deliberately timid fallback sized so furniture can't
+ * float when we know nothing about the room — but it describes the same ~4m²
+ * strip whether the photo shows a cramped corner or a wide empty hall, which
+ * made the planner offer a single accent chair for a clearly spacious room.
+ * Once the room has been analysed we know where the floor really starts, so use
+ * it: take the LOWEST detected floor start across the width, so every column of
+ * the band is genuinely floor rather than wall.
+ */
+export function floorRegion(): Region {
+  const calib = SCENE_CALIB;
+  if (!calib?.floorTop?.length) return FLOOR_REGION;
+  // MEDIAN, not max: one column where the floor starts late (a tall object at the
+  // frame edge) would otherwise collapse the whole band — it measured a wide empty
+  // room at 1.9m². Per-column grounding in groundAnchor keeps individual pieces
+  // off the wall, so the band itself only needs to describe the typical floor.
+  const sorted = [...calib.floorTop].filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return FLOOR_REGION;
+  const median = sorted[Math.floor(sorted.length / 2)];
+  const minY = Math.min(0.8, Math.max(0.35, median + 0.015));
+  return { minX: 0.06, maxX: 0.94, minY, maxY: 0.96 };
+}
+
+/**
  * Find a spot with no overlap, starting from a preferred anchor and spiralling
  * outward within `region`. Returns null when the space is genuinely full — the
  * signal the UI uses to say "no room for this piece". Vertical steps are damped
@@ -426,7 +451,7 @@ export function findFreeAnchor(
   aspect: number,
   calib: Calibration,
   depth: DepthField | null,
-  region: Region = FLOOR_REGION,
+  region: Region = floorRegion(),
   obstacles: OBB[] = [],
 ): { ax: number; ay: number } | null {
   const inRegion = (x: number, y: number) =>
@@ -485,7 +510,7 @@ export function rearrangeAnchors(
   let unplaced = 0;
 
   for (const plane of ["floor", "ceiling"] as const) {
-    const region = plane === "ceiling" ? CEILING_ANCHOR_BAND : FLOOR_REGION;
+    const region = plane === "ceiling" ? CEILING_ANCHOR_BAND : floorRegion();
     const planeObstacles = plane === "floor" ? obstacles : []; // real objects block floor only
     const group = items.filter((it) => it.product.mount === plane);
     const sorted = [...group].sort(

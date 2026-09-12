@@ -48,8 +48,8 @@ import {
   setSceneCalib,
   rearrangeAnchors,
   floorCapacity,
+  floorRegion,
   footprintAreaM2,
-  FLOOR_REGION,
   CEILING_ANCHOR_BAND,
 } from "@/lib/placement";
 import { captureComposite, capturePhotoView } from "@/lib/capture";
@@ -246,7 +246,10 @@ function Studio() {
     setSceneCalib(null); // clear any previous room's calibration
     setCachedFloorSpots([]); // invalidate candidate cache when room changes
     if (!url || !projectId) return;
-    const cacheKey = `roomAnalysis:${projectId}`;
+    // Keyed on the PHOTO, not just the project: a restyle produces a new photo,
+    // and reusing the old analysis kept furniture the edit had already removed as
+    // phantom floor obstacles — which reported a cleared room as 0m² free.
+    const cacheKey = `roomAnalysis:${projectId}:${url}`;
     const applyAnalysis = (a: { objects: FloorObjectBox[]; floorTop: number[]; ceilingBottom: number[] }) => {
       setSceneCalib({ floorTop: a.floorTop, ceilingBottom: a.ceilingBottom });
       setRealObjects(a.objects); // state change re-renders the scene with the new calib
@@ -375,7 +378,7 @@ function Studio() {
       const mount: "floor" | "ceiling" = product?.mount === "ceiling" ? "ceiling" : "floor";
       const ceiling = mount === "ceiling";
       const aspect = stage.w / Math.max(1, stage.h);
-      const region = ceiling ? CEILING_ANCHOR_BAND : FLOOR_REGION;
+      const region = ceiling ? CEILING_ANCHOR_BAND : floorRegion();
       const samePlane = items.filter((it) => (it.product.mount === "ceiling") === ceiling);
       const fallback = ceiling ? CEILING_FALLBACK : FLOOR_FALLBACK;
       // Real floor objects (segmentation) → obstacle boxes the engine must avoid.
@@ -613,7 +616,7 @@ function Studio() {
 
       for (const { entry, product } of order) {
         const ceiling = product.mount === "ceiling";
-        const region = ceiling ? CEILING_ANCHOR_BAND : FLOOR_REGION;
+        const region = ceiling ? CEILING_ANCHOR_BAND : floorRegion();
         const spec: FootprintSpec = {
           widthCm: product.widthCm,
           depthCm: product.depthCm,
@@ -722,7 +725,7 @@ function Studio() {
 
       for (const product of queue) {
         const ceiling = product.mount === "ceiling";
-        const region = ceiling ? CEILING_ANCHOR_BAND : FLOOR_REGION;
+        const region = ceiling ? CEILING_ANCHOR_BAND : floorRegion();
         const samePlane = working.filter((it) => (it.product.mount === "ceiling") === ceiling);
         const spec: FootprintSpec = {
           widthCm: product.widthCm,
@@ -836,7 +839,11 @@ function Studio() {
       setProject((p) => (p ? { ...p, photoUrl: newPhotoUrl } : p));
       if (projectId && typeof window !== "undefined") {
         try {
-          window.localStorage.removeItem(`roomAnalysis:${projectId}`);
+          // Analyses are keyed per photo, so drop every one for this project —
+          // including entries left by earlier edits.
+          for (const k of Object.keys(window.localStorage)) {
+            if (k.startsWith(`roomAnalysis:${projectId}`)) window.localStorage.removeItem(k);
+          }
           for (let i = 0; i <= 12; i++) window.localStorage.removeItem(`lightInsight:${projectId}:${i}`);
         } catch {
           /* ignore */
