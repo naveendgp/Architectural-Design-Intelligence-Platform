@@ -84,6 +84,13 @@ function Furniture({
   // Real floor depth at the drop point (falls back to vertical position).
   const pos = itemWorldPos(item, aspect, calib, depth);
   const fp = (baseSpan * item.scale * calib.scale) / 2;
+  /* True half-extents of the footprint. `fp` above is a RADIUS taken from the
+     longest dimension, so drawing a circle with it put a 1.1m halo around a sofa
+     only 0.39m deep — it swept over neighbouring pieces and read as a collision
+     even when the maths said they were clear. Ring and shadow use the real
+     width x depth instead, and sit inside the yaw group so they turn with it. */
+  const halfW = Math.max(0.12, ((item.product.widthCm ?? 100) / 100) * item.scale * calib.scale / 2);
+  const halfD = Math.max(0.12, ((item.product.depthCm ?? 100) / 100) * item.scale * calib.scale / 2);
 
   // Yaw = product's captured front + Gemini's exact absolute facing angle + user nudge.
   const yaw =
@@ -112,14 +119,17 @@ function Furniture({
           ]}
         >
           {(selected || colliding) && (
-            <mesh rotation-x={-Math.PI / 2} position={[0, 0.015, 0]}>
-              <ringGeometry args={[Math.max(0.2, fp * 0.95), Math.max(0.3, fp * 1.18), 48]} />
-              <meshBasicMaterial
-                color={colliding ? "#ef4444" : "#6366f1"}
-                transparent
-                opacity={colliding ? 0.95 : 0.9}
-              />
-            </mesh>
+            // Unit ring scaled to the footprint — an ellipse that hugs the piece.
+            <group scale={[halfW * 1.16, 1, halfD * 1.16]}>
+              <mesh rotation-x={-Math.PI / 2} position={[0, 0.015, 0]}>
+                <ringGeometry args={[0.88, 1, 64]} />
+                <meshBasicMaterial
+                  color={colliding ? "#ef4444" : "#6366f1"}
+                  transparent
+                  opacity={colliding ? 0.95 : 0.9}
+                />
+              </mesh>
+            </group>
           )}
           {/* Collision overlay — red translucent box */}
           {colliding && (
@@ -132,7 +142,9 @@ function Furniture({
           )}
           <Shadow
             position={[0, 0.008, 0]}
-            scale={Math.max(0.4, fp * 2.2)}
+            // Matches the footprint too; a square shadow sized on the longest
+            // dimension made every piece look far bigger than it is.
+            scale={[halfW * 2.3, halfD * 2.3, 1]}
             color={colliding ? "#ef4444" : "#000000"}
             opacity={colliding ? 0.6 : 0.45}
           />
