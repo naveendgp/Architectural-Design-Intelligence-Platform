@@ -591,7 +591,11 @@ export class GeminiQuotaError extends Error {
 }
 
 export type RenderedImage = { data: Buffer; mimeType: string };
-export type RenderContext = { ceilingLights?: number };
+export type RenderContext = {
+  ceilingLights?: number;
+  /** Names of every piece composited into the shot — the render must show them all. */
+  pieces?: string[];
+};
 
 /** Shared image-in / image-out call to a given image model. */
 async function generateImage(
@@ -690,31 +694,59 @@ export async function renderRealistic(
   ctx: RenderContext = {},
 ): Promise<RenderedImage> {
   const lights = ctx.ceilingLights ?? 0;
+  const pieces = ctx.pieces ?? [];
+  const inventory = pieces.length
+    ? `THE SHOT CONTAINS THESE ${pieces.length} PLACED PIECE${pieces.length === 1 ? "" : "S"} — every one of them must still be present, unchanged, in your output:\n${pieces
+        .map((n) => `- ${n}`)
+        .join("\n")}\n\n`
+    : "";
   const lightingClause =
     lights > 0
       ? `LIGHTING: The scene has ${lights} ceiling light fixture${lights === 1 ? "" : "s"} — the exact fixtures visible in the image. Treat them as the primary artificial light sources and render the room as if they are switched ON: warm, physically-plausible light emanating from each fixture, realistic falloff, soft layered shadows, gentle highlights and bounce (global illumination) on nearby surfaces. Balance this with the existing daylight from the windows. Do NOT add any light source that is not one of these fixtures or the windows.`
       : `LIGHTING: There are no ceiling fixtures placed. Light the room only with the natural daylight already coming through its windows — do not invent lamps, spotlights, or fixtures.`;
 
-  const prompt = `You are a photorealistic architectural rendering engine (think V-Ray /
-Corona). The input is a real photo of a room with furniture and light fixtures composited
-into it. Output ONE photorealistic photograph of THIS EXACT SCENE.
+  const prompt = `You are an award-winning interior photographer and architectural
+visualiser. The input is a real photo of a room with furniture and light fixtures
+composited into it. Produce ONE magazine-quality photograph of THIS room, finished to
+the standard of a high-end interior shoot.
 
-ABSOLUTE FIDELITY — do not invent or hallucinate anything:
-- Keep the SAME room: identical walls, floor, ceiling, windows, doors, curtains, wall
-  art, TV, and any pre-existing real furniture — same colours, textures, and positions.
-- Keep EVERY placed piece of furniture and every light fixture exactly as shown: same
-  position, size, orientation, shape, colour, and material. Do NOT add new furniture,
-  remove anything, move anything, resize, recolour, or restyle. No new decor, plants,
-  rugs, or props. The camera angle, framing, and aspect ratio stay identical.
-- If something looks like a rough 3D/pasted model, make ONLY that object read as real
-  (materials, edges, contact shadow) — do not replace it with a different object.
+${inventory}There are two different rules for the two halves of this image.
 
-MAKE IT PHOTOREAL (this is the only thing you change):
-- Physically-based materials: correct leather/fabric/wood/metal/glass response, subtle
-  reflections and micro-roughness. Accurate soft contact shadows and ambient occlusion
-  where objects meet the floor and each other.
-- Realistic global illumination and colour bleeding, natural white balance, no cartoon
-  or over-saturated look, no visible "pasted-in" seams.
+1. THE FURNITURE AND FIXTURES ARE SACRED — never change them.
+- CRITICAL: every piece listed above must be clearly visible in your output, in the
+  same place. Deleting one is the single worst thing you can do here. A previous
+  attempt erased a chair and all the pendant lights while "tidying" the room — never
+  do that.
+- Every piece of furniture and every light fitting stays EXACTLY as shown: same
+  position, footprint, size, orientation, silhouette, colour and material. This
+  includes pre-existing real furniture AND the pieces composited into the photo.
+- Do NOT add furniture, remove furniture, swap one piece for another, move, rotate,
+  resize or recolour anything. No new decor, plants, rugs, cushions or props.
+- Anything that reads as a rough 3D or pasted-in model must be made to look like a
+  real object of THAT SAME design — real materials, believable edges, correct contact
+  shadow and reflection — never replaced by a different object.
+- Keep people, mobility aids and personal belongings exactly as they are.
+
+2. THE ROOM ITSELF MUST BE RE-FINISHED TO A PREMIUM STANDARD.
+This is a redesign visualisation, not a tidy-up: the surfaces are EXPECTED to change,
+and returning the room with its original finishes is a failed result. Treat it as if a
+good interior designer had re-specified every finish and a professional photographer had
+lit and shot it:
+- You MUST upgrade the wall finish (refined plaster or paint in a tasteful, cohesive
+  modern colour — do not keep a dated or clashing existing colour).
+- You MUST upgrade the floor to a well-laid premium surface (stone, large-format tile or
+  timber) with honest reflections and correct perspective.
+- Refresh window and door frames in a tasteful modern finish, and replace tired curtains
+  with well-made drapes.
+- Keep the palette calm and cohesive so the placed furniture reads as the hero.
+- Architecture is FIXED: the room's shape and dimensions, and the exact positions and
+  sizes of every window, door and opening stay identical. You are refinishing surfaces,
+  never rebuilding the room.
+- Photography: professional composition-preserving exposure, natural white balance,
+  clean highlights, true blacks, believable global illumination and colour bleed,
+  accurate soft shadows and ambient occlusion. No cartoon look, no over-saturation, no
+  HDR halos, no pasted-in seams.
+- The camera angle, framing and aspect ratio stay identical to the input.
 
 ${lightingClause}
 

@@ -16,6 +16,7 @@ export function RenderDialog({
   photoUrl,
   projectId,
   ceilingLights,
+  pieces,
 }: {
   open: boolean;
   onClose: () => void;
@@ -23,6 +24,8 @@ export function RenderDialog({
   photoUrl: string;
   projectId?: string;
   ceilingLights?: number;
+  /** Names of the placed pieces, so the render can't quietly drop one. */
+  pieces?: string[];
 }) {
   const [phase, setPhase] = useState<Phase>("capturing");
   const [before, setBefore] = useState<string | null>(null);
@@ -48,6 +51,7 @@ export function RenderDialog({
       const res = await api.render(shot, {
         projectId,
         ceilingLights,
+        pieces,
         renderId: renderIdRef.current,
       });
       if (id !== runId.current) return;
@@ -60,7 +64,7 @@ export function RenderDialog({
       setError({ message: err.message, billing: err.code === "billing" });
       setPhase("error");
     }
-  }, [photoUrl, stageRef, projectId, ceilingLights]);
+  }, [photoUrl, stageRef, projectId, ceilingLights, pieces]);
 
   useEffect(() => {
     if (open) run();

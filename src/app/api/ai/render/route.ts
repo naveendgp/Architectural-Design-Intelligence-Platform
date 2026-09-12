@@ -13,9 +13,10 @@ export async function POST(req: Request) {
   let image: string | undefined;
   let projectId: string | undefined;
   let ceilingLights: number | undefined;
+  let pieces: string[] | undefined;
   let renderId: string | undefined;
   try {
-    ({ image, projectId, ceilingLights, renderId } = await req.json());
+    ({ image, projectId, ceilingLights, renderId, pieces } = await req.json());
   } catch {
     return Response.json({ error: "invalid body" }, { status: 400 });
   }
@@ -33,6 +34,7 @@ export async function POST(req: Request) {
   try {
     const out = await renderRealistic(input, mime, {
       ceilingLights: Math.max(0, Number(ceilingLights) || 0),
+      pieces: Array.isArray(pieces) ? pieces.filter((p): p is string => typeof p === "string").slice(0, 24) : [],
     });
     const ext = out.mimeType.includes("jpeg") ? ".jpg" : ".png";
     const { url } = await saveFile(out.data, { folder: "renders", ext });

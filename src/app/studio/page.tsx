@@ -1374,6 +1374,7 @@ function Studio() {
             photoUrl={project.photoUrl}
             projectId={projectId ?? undefined}
             ceilingLights={installedLights}
+            pieces={placedSummary.map((p) => (p.qty > 1 ? `${p.qty} × ${p.name}` : p.name))}
           />
         )}
 

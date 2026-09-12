@@ -199,7 +199,7 @@ export const api = {
   // Surfaces the server's error message + code (e.g. "billing") on failure.
   render: async (
     image: string,
-    opts: { projectId?: string; ceilingLights?: number; renderId?: string } = {},
+    opts: { projectId?: string; ceilingLights?: number; renderId?: string; pieces?: string[] } = {},
   ) => {
     const res = await fetch("/api/ai/render", {
       method: "POST",
