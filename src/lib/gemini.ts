@@ -535,7 +535,15 @@ export type FloorObject = { label: string; x0: number; y0: number; x1: number; y
 // floorTop[i] / ceilingBottom[i] = the normalized y of the wall–floor / wall–ceiling
 // line, sampled left→right at x = 0, 1/6, 2/6 … 1 (7 points). Floor is BELOW floorTop;
 // ceiling is ABOVE ceilingBottom.
-export type RoomAnalysis = { objects: FloorObject[]; floorTop: number[]; ceilingBottom: number[] };
+export type RoomAnalysis = {
+  objects: FloorObject[];
+  floorTop: number[];
+  ceilingBottom: number[];
+  /** Real distance (m) to the floor at the bottom edge of the photo. */
+  nearDepthM: number;
+  /** Real distance (m) to the farthest visible floor — the far wall or corridor end. */
+  farDepthM: number;
+};
 
 /**
  * Analyze the room photo: (1) the real furniture/objects occupying FLOOR space, so
@@ -544,7 +552,7 @@ export type RoomAnalysis = { objects: FloorObject[]; floorTop: number[]; ceiling
  * Coordinates are normalized (0..1, top-left origin). Run once per room and cache.
  */
 export async function analyzeRoom(image: Buffer, mimeType: string): Promise<RoomAnalysis> {
-  const prompt = `Analyze this room photo. Return THREE things.
+  const prompt = `Analyze this room photo. Return FOUR things.
 
 1. objects: every real object that RESTS ON THE FLOOR and occupies floor space —
    sofas, chairs, stools, tables, cabinets on the floor, a wheelchair, floor lamps,
@@ -562,7 +570,17 @@ export async function analyzeRoom(image: Buffer, mimeType: string): Promise<Room
 
 3. ceilingBottom: an array of 7 numbers (0..1) giving the y where the CEILING meets
    the walls (the wall–ceiling line), sampled at the same 7 x positions. Everything
-   ABOVE ceilingBottom[i] is ceiling. If no ceiling is visible, use small values (~0.05).`;
+   ABOVE ceilingBottom[i] is ceiling. If no ceiling is visible, use small values (~0.05).
+
+4. HOW DEEP THE SPACE IS, in real metres — this sets the scale everything is drawn
+   at, so judge it from the architecture you can see (door heights ~2.0m, ceiling
+   tiles ~0.6m, floor tiles, a standard step):
+   - nearDepthM: distance from the camera to the floor at the very BOTTOM edge of
+     the photo. Typically 1-3m.
+   - farDepthM: distance from the camera to the FARTHEST visible floor — the far
+     wall, or the end of a corridor. A small room may be 4-6m; a long corridor or
+     lift lobby can be 10-15m. Do not default to a mid value: a deep space
+     reported as shallow makes furniture render far too large.`;
 
   const line7 = { type: "array", items: { type: "number" } };
   const parsed = await generateJson(image, mimeType, prompt, {
@@ -584,8 +602,10 @@ export async function analyzeRoom(image: Buffer, mimeType: string): Promise<Room
       },
       floorTop: line7,
       ceilingBottom: line7,
+      nearDepthM: { type: "number" },
+      farDepthM: { type: "number" },
     },
-    required: ["objects", "floorTop", "ceilingBottom"],
+    required: ["objects", "floorTop", "ceilingBottom", "nearDepthM", "farDepthM"],
   });
 
   const raw = Array.isArray(parsed.objects) ? (parsed.objects as unknown[]) : [];
@@ -605,10 +625,17 @@ export async function analyzeRoom(image: Buffer, mimeType: string): Promise<Room
     const clean = arr.filter((n) => Number.isFinite(n));
     return clean.length >= 2 ? clean : [fallback, fallback];
   };
+  /* Depth sets the scale everything is drawn at, so keep the estimate inside
+     plausible architecture and make sure far is meaningfully beyond near. */
+  const near = Math.min(4, Math.max(0.8, Number(parsed.nearDepthM) || 1.7));
+  const far = Math.min(20, Math.max(near + 1.5, Number(parsed.farDepthM) || 6.5));
+
   return {
     objects,
     floorTop: clampLine(parsed.floorTop, 0.62),
     ceilingBottom: clampLine(parsed.ceilingBottom, 0.08),
+    nearDepthM: near,
+    farDepthM: far,
   };
 }
 

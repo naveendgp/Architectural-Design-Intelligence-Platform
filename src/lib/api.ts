@@ -64,6 +64,8 @@ export const api = {
       objects: { label: string; x0: number; y0: number; x1: number; y1: number }[];
       floorTop: number[];
       ceilingBottom: number[];
+      nearDepthM?: number;
+      farDepthM?: number;
     }>("/api/ai/segment", "POST", { image }),
   // AI: ask Gemini where a new item should go, its facing angle, and whether it
   // fits — given a screenshot of the room with current furniture.

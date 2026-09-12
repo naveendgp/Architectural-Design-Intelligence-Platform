@@ -257,7 +257,29 @@ function Studio() {
     // and reusing the old analysis kept furniture the edit had already removed as
     // phantom floor obstacles — which reported a cleared room as 0m² free.
     const cacheKey = `roomAnalysis:${projectId}:${url}`;
-    const applyAnalysis = (a: { objects: FloorObjectBox[]; floorTop: number[]; ceilingBottom: number[] }) => {
+    const applyAnalysis = (a: {
+      objects: FloorObjectBox[];
+      floorTop: number[];
+      ceilingBottom: number[];
+      nearDepthM?: number;
+      farDepthM?: number;
+    }) => {
+      /* Scale everything to the room's REAL depth. The near/far constants used to
+         be fixed at 1.7-6.5m, which suits a living room but not a lift lobby that
+         runs 10m+: a chair placed down the corridor was drawn as if it stood 3m
+         away when it really stood 8m, so it rendered about 2.5x too large. A hand
+         calibration always wins — we only fill in what the user hasn't set. */
+      if (
+        typeof a.nearDepthM === "number" &&
+        typeof a.farDepthM === "number" &&
+        a.farDepthM > a.nearDepthM
+      ) {
+        /* Depth is a MEASUREMENT of the room, so it always follows the analysis —
+           gating it on "has the user calibrated?" would strand every project that
+           had ever run auto-fit, since that writes the same saved calibration.
+           `scale` is taste and stays exactly as the user left it. */
+        applyCalib((c) => ({ ...c, nearDepth: a.nearDepthM!, farDepth: a.farDepthM! }));
+      }
       setSceneCalib({ floorTop: a.floorTop, ceilingBottom: a.ceilingBottom });
       setRealObjects(a.objects); // state change re-renders the scene with the new calib
       // Signals "this room has been measured". The AI bar waits on this before
@@ -304,7 +326,7 @@ function Studio() {
       active = false;
       clearTimeout(t);
     };
-  }, [project?.photoUrl, projectId]);
+  }, [project?.photoUrl, projectId, applyCalib]);
 
   // Marketplace products that have a usable 3D model.
   useEffect(() => {
