@@ -217,9 +217,11 @@ export type DesignPlan = {
   budgetInr: number;
   /** True when the request wasn't about furniture at all (chat falls back). */
   offTopic: boolean;
-  /** An optional flooring/wall restyle when the room's existing surfaces fight
-      the look being asked for. One combined instruction so it costs one edit. */
-  surfaces?: { instruction: string; reason: string };
+  /** Distinct restyle directions for the room's surfaces, tailored to the brief —
+      e.g. for "modern": a pared-back take and a richer one. The user picks a
+      direction rather than answering yes/no. Each instruction is self-contained
+      so applying one costs a single image edit. */
+  surfaceOptions?: { label: string; instruction: string; reason: string }[];
 };
 
 const MAX_PLAN_LINES = 8;
@@ -317,7 +319,14 @@ RULES:
 - SURFACES: furniture alone often can't deliver the look. Study the room's
   existing flooring and walls in the photo. If they genuinely fight the style
   being asked for (dated tiles under a "modern" brief, a colour that clashes),
-  propose a restyle in "surfaces":
+  propose 2 or 3 DISTINCT directions in "surfaceOptions" and let the user choose.
+  They must be genuinely different takes on what was asked for, not degrees of
+  the same thing — for a "modern" brief, e.g. a pared-back minimal treatment
+  versus a warmer, more luxurious one. Derive them from the user's own words: a
+  "cosy" brief yields cosy directions, an "office" brief yields workplace ones.
+    - label: 2-3 words naming the direction, e.g. "Minimal modern", "Warm luxe".
+      This is a button, so keep it short and concrete.
+  Each option needs:
     - instruction: name EVERY change the room needs to actually reach the look,
       as one explicit list. Repainting a wall alone rarely transforms a dated
       room — look at the photo and say what is holding it back. Cover, where
@@ -331,7 +340,7 @@ RULES:
       patterned ceiling trim".
     - Do NOT ask to remove or alter anything the user might want kept, such as
       windows, doors, or built-in structure.
-    - reason: a short phrase on why it helps.
+    - reason: a short phrase on what that direction gives the room.
   ONLY propose this when the request is about the room's overall look or purpose
   ("make it modern", "turn this into a waiting area"). If the user asked for a
   specific piece ("add a reading chair"), just add the piece — redecorating the
@@ -350,12 +359,17 @@ RULES:
       reply: { type: "string" },
       budgetInr: { type: "number", description: "rupees, 0 if not specified" },
       offTopic: { type: "boolean" },
-      surfaces: {
-        type: "object",
-        description: "Optional flooring/wall restyle; omit when not needed.",
-        properties: {
-          instruction: { type: "string" },
-          reason: { type: "string" },
+      surfaceOptions: {
+        type: "array",
+        description: "2-3 distinct restyle directions; omit when not needed.",
+        items: {
+          type: "object",
+          properties: {
+            label: { type: "string" },
+            instruction: { type: "string" },
+            reason: { type: "string" },
+          },
+          required: ["label", "instruction"],
         },
       },
       items: {
@@ -389,17 +403,20 @@ RULES:
     if (items.length >= MAX_PLAN_LINES) break;
   }
 
-  const rawSurfaces = parsed.surfaces as { instruction?: unknown; reason?: unknown } | undefined;
-  const surfaceInstruction =
-    rawSurfaces && typeof rawSurfaces.instruction === "string" ? rawSurfaces.instruction.trim() : "";
+  const surfaceOptions = (Array.isArray(parsed.surfaceOptions) ? parsed.surfaceOptions : [])
+    .map((raw) => {
+      const o = raw as { label?: unknown; instruction?: unknown; reason?: unknown };
+      return {
+        label: typeof o.label === "string" ? o.label.trim() : "",
+        instruction: typeof o.instruction === "string" ? o.instruction.trim() : "",
+        reason: typeof o.reason === "string" ? o.reason : "",
+      };
+    })
+    .filter((o) => o.label && o.instruction)
+    .slice(0, 3);
 
   return {
-    surfaces: surfaceInstruction
-      ? {
-          instruction: surfaceInstruction,
-          reason: typeof rawSurfaces?.reason === "string" ? rawSurfaces.reason : "",
-        }
-      : undefined,
+    surfaceOptions: surfaceOptions.length ? surfaceOptions : undefined,
     intent: typeof parsed.intent === "string" ? parsed.intent : "",
     reply: typeof parsed.reply === "string" ? parsed.reply : "",
     items,

@@ -25,8 +25,8 @@ export type Plan = {
   droppedForSpace?: string[];
   items: PlanLine[];
   applied?: boolean;
-  /** Optional flooring/wall restyle the planner thinks the look needs. */
-  surfaces?: { instruction: string; reason: string } | null;
+  /** Restyle directions the user can pick between, tailored to their brief. */
+  surfaceOptions?: { label: string; instruction: string; reason: string }[] | null;
 };
 
 /** A yes/no (or pick-one) prompt rendered as buttons, so the user never has to
@@ -275,9 +275,6 @@ export function StudioChat({
      studio re-runs its room analysis — wait for that before placing, otherwise
      the layout is packed against the floor of a room that no longer exists. */
   const restyleThenFurnish = async (msgId: number, plan: Plan, instruction: string) => {
-    setMessages((m) =>
-      m.map((x) => (x.id === msgId ? { ...x, chose: "Restyling the room first", actions: undefined } : x)),
-    );
     const ok = await runRoomEdit(msgId, instruction);
     if (!ok) return;
 
@@ -423,8 +420,8 @@ export function StudioChat({
       }
 
       const totalInr = items.reduce((n, l) => n + l.subtotalInr, 0);
-      const surfaces = plan.surfaces;
-      const canEdit = !!(projectId && photoUrl && onRoomEdited);
+      const options = plan.surfaceOptions ?? [];
+      const canEdit = !!(projectId && photoUrl && onRoomEdited && options.length);
       const msgId = nextId();
       const planData: Plan = {
         intent: plan.intent,
@@ -433,7 +430,7 @@ export function StudioChat({
         trimmed: plan.trimmed,
         droppedForSpace,
         items,
-        surfaces,
+        surfaceOptions: plan.surfaceOptions,
       };
 
       /* Order matters: finish the room, THEN furnish it. Placing first meant the
@@ -444,34 +441,39 @@ export function StudioChat({
         {
           id: msgId,
           role: "ai",
-          text:
-            surfaces && canEdit
-              ? `${plan.reply}\n\nI'd do the room first — ${surfaces.instruction.replace(/\.$/, "")}${surfaces.reason ? ` (${surfaces.reason})` : ""} — and then place these pieces into it.`
-              : plan.reply,
+          text: canEdit
+            ? `${plan.reply}\n\nI'd finish the room first, then place these pieces into it. Which direction do you want?\n\n${options
+                .map((o) => `· ${o.label} — ${o.reason || o.instruction}`)
+                .join("\n")}`
+            : plan.reply,
           plan: planData,
-          // With a restyle to do first, the card's own Add button is replaced by
-          // an explicit ordered choice.
-          actions:
-            surfaces && canEdit
-              ? [
-                  {
-                    label: "Restyle the room first",
-                    primary: true,
-                    run: () => restyleThenFurnish(msgId, planData, surfaces.instruction),
+          /* A style choice, not a yes/no: each button is a different direction on
+             the brief, so the user steers the look without having to describe it. */
+          actions: canEdit
+            ? [
+                ...options.map((o, i) => ({
+                  label: o.label,
+                  primary: i === 0,
+                  run: () => {
+                    setMessages((mm) =>
+                      mm.map((x) => (x.id === msgId ? { ...x, chose: o.label, actions: undefined } : x)),
+                    );
+                    restyleThenFurnish(msgId, planData, o.instruction);
                   },
-                  {
-                    label: "Just add the furniture",
-                    run: () => {
-                      setMessages((mm) =>
-                        mm.map((x) =>
-                          x.id === msgId ? { ...x, chose: "Adding furniture only", actions: undefined } : x,
-                        ),
-                      );
-                      applyPlan(msgId, planData);
-                    },
+                })),
+                {
+                  label: "Keep the room as it is",
+                  run: () => {
+                    setMessages((mm) =>
+                      mm.map((x) =>
+                        x.id === msgId ? { ...x, chose: "Keeping the room as it is", actions: undefined } : x,
+                      ),
+                    );
+                    applyPlan(msgId, planData);
                   },
-                ]
-              : undefined,
+                },
+              ]
+            : undefined,
         },
       ]);
     } catch (e) {
@@ -590,7 +592,9 @@ export function StudioChat({
                   key={m.id}
                   msg={m}
                   busy={busy}
-                  onApply={m.plan ? () => applyPlan(m.id, m.plan!) : undefined}
+                  // While a style choice is pending, the card's own Add button would
+                  // let the user skip the room step entirely — so hide it.
+                  onApply={m.plan && !m.actions ? () => applyPlan(m.id, m.plan!) : undefined}
                 />
               ))}
               {typing && <Typing label={busyLabel} />}
