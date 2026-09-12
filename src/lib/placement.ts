@@ -426,14 +426,23 @@ export const FLOOR_REGION: Region = { minX: 0.1, maxX: 0.9, minY: 0.64, maxY: 0.
 export function floorRegion(): Region {
   const calib = SCENE_CALIB;
   if (!calib?.floorTop?.length) return FLOOR_REGION;
-  // MEDIAN, not max: one column where the floor starts late (a tall object at the
-  // frame edge) would otherwise collapse the whole band — it measured a wide empty
-  // room at 1.9m². Per-column grounding in groundAnchor keeps individual pieces
-  // off the wall, so the band itself only needs to describe the typical floor.
+  /* A LOW PERCENTILE of the floor line, not max and not the median.
+     - max let a single late-starting column (a tall object at the frame edge)
+       collapse the whole band; a wide empty room measured 1.9m².
+     - the median then threw away the middle of the view, which is exactly where
+       a corridor's floor runs: a lift lobby read [0.91, 0.70, 0.63, 0.58, 0.58,
+       0.79, 0.93] — edges late, centre early — so the median (0.70) measured it
+       at 2.7m² and the planner could only justify a single chair.
+     The 25th percentile follows the floor people actually walk on, and stays
+     robust to one noisy sample. Pieces still can't ride up a wall: groundAnchor
+     snaps each one to its OWN column's floor line. */
   const sorted = [...calib.floorTop].filter(Number.isFinite).sort((a, b) => a - b);
   if (!sorted.length) return FLOOR_REGION;
-  const median = sorted[Math.floor(sorted.length / 2)];
-  const minY = Math.min(0.8, Math.max(0.35, median + 0.015));
+  const at = (sorted.length - 1) * 0.25;
+  const lo = Math.floor(at);
+  const hi = Math.ceil(at);
+  const p25 = sorted[lo] + (sorted[hi] - sorted[lo]) * (at - lo);
+  const minY = Math.min(0.8, Math.max(0.35, p25 + 0.015));
   return { minX: 0.06, maxX: 0.94, minY, maxY: 0.96 };
 }
 
