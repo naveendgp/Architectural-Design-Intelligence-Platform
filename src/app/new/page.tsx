@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -34,6 +34,8 @@ const ROOM_TYPES = [
   "Outdoor",
 ];
 
+const MAX_PHOTO_BYTES = 20 * 1024 * 1024;
+
 const inputCls =
   "w-full h-12 px-4 rounded-xl bg-surface border border-border focus:border-primary outline-none text-[15px] transition-colors";
 
@@ -51,10 +53,77 @@ export default function NewProjectPage() {
   const [error, setError] = useState<string | null>(null);
 
   const fileRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  // Nested elements fire dragleave as the pointer crosses them, so count
+  // enter/leave instead of toggling on the first leave.
+  const dragDepth = useRef(0);
 
   const onPickPhoto = (f: File | null) => {
+    if (f) {
+      if (!f.type.startsWith("image/")) {
+        setPhotoError(`${f.name} isn't an image. Drop a JPG or PNG.`);
+        return;
+      }
+      if (f.size > MAX_PHOTO_BYTES) {
+        setPhotoError(
+          `That photo is ${(f.size / 1024 / 1024).toFixed(1)}MB — the limit is 20MB.`,
+        );
+        return;
+      }
+    }
+    setPhotoError(null);
     setPhotoFile(f);
-    setPhotoPreview(f ? URL.createObjectURL(f) : null);
+    setPhotoPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return f ? URL.createObjectURL(f) : null;
+    });
+  };
+
+  /* Without this, a photo dropped just outside the zone makes the browser
+     navigate away to the file and the user loses everything typed so far. */
+  useEffect(() => {
+    const swallow = (e: DragEvent) => e.preventDefault();
+    window.addEventListener("dragover", swallow);
+    window.addEventListener("drop", swallow);
+    return () => {
+      window.removeEventListener("dragover", swallow);
+      window.removeEventListener("drop", swallow);
+    };
+  }, []);
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDragging(false);
+    const items = Array.from(e.dataTransfer.files);
+    if (!items.length) {
+      // Dragging an image straight off a web page gives a URL, not a file.
+      setPhotoError("Drop an image file from your computer.");
+      return;
+    }
+    onPickPhoto(items.find((f) => f.type.startsWith("image/")) ?? items[0]);
+  };
+
+  const dragProps = {
+    onDragEnter: (e: React.DragEvent) => {
+      e.preventDefault();
+      dragDepth.current += 1;
+      setDragging(true);
+    },
+    onDragOver: (e: React.DragEvent) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy" as const;
+    },
+    onDragLeave: (e: React.DragEvent) => {
+      e.preventDefault();
+      dragDepth.current -= 1;
+      if (dragDepth.current <= 0) {
+        dragDepth.current = 0;
+        setDragging(false);
+      }
+    },
+    onDrop,
   };
 
   // Actually upload the photo + create the project record in the database.
@@ -153,36 +222,71 @@ export default function NewProjectPage() {
                 className="hidden"
                 onChange={(e) => onPickPhoto(e.target.files?.[0] ?? null)}
               />
-              {photoPreview ? (
-                <div className="relative rounded-3xl overflow-hidden border border-border">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={photoPreview} alt="Room" className="w-full max-h-[340px] object-cover" />
+              <div {...dragProps}>
+                {photoPreview ? (
+                  <div
+                    className={cn(
+                      "relative rounded-3xl overflow-hidden border transition-colors duration-200",
+                      dragging ? "border-primary border-2" : "border-border",
+                    )}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={photoPreview} alt="Room" className="w-full max-h-[340px] object-cover" />
+                    <button
+                      onClick={() => fileRef.current?.click()}
+                      className="absolute top-3 right-3 inline-flex items-center gap-1.5 h-9 px-3 rounded-xl glass !border-white/20 text-white text-sm font-medium"
+                    >
+                      <UploadCloud className="h-4 w-4" /> Replace
+                    </button>
+                    <span className="absolute bottom-3 left-3 inline-flex items-center gap-1.5 glass !border-white/20 text-white text-sm px-3 py-1.5 rounded-full">
+                      <Check className="h-4 w-4 text-emerald-400" /> {photoFile?.name}
+                    </span>
+                    {dragging && (
+                      <div className="absolute inset-0 grid place-items-center gap-2 bg-surface/80 backdrop-blur-sm pointer-events-none">
+                        <div className="grid place-items-center h-14 w-14 rounded-2xl bg-primary/10 text-primary">
+                          <UploadCloud className="h-6 w-6" />
+                        </div>
+                        <p className="font-medium">Drop to replace this photo</p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
                   <button
                     onClick={() => fileRef.current?.click()}
-                    className="absolute top-3 right-3 inline-flex items-center gap-1.5 h-9 px-3 rounded-xl glass !border-white/20 text-white text-sm font-medium"
+                    className={cn(
+                      "w-full grid place-items-center text-center gap-3 py-16 rounded-3xl border-2 border-dashed transition-all duration-300",
+                      dragging
+                        ? "border-primary bg-primary/5 scale-[1.01]"
+                        : "border-border-strong hover:border-primary hover:bg-surface-muted/50",
+                    )}
                   >
-                    <UploadCloud className="h-4 w-4" /> Replace
+                    <div
+                      className={cn(
+                        "grid place-items-center h-16 w-16 rounded-2xl transition-colors duration-200",
+                        dragging ? "bg-primary/10 text-primary" : "bg-surface-muted text-muted",
+                      )}
+                    >
+                      {dragging ? <UploadCloud className="h-7 w-7" /> : <ImageIcon className="h-7 w-7" />}
+                    </div>
+                    <div>
+                      <p className="font-medium text-lg">
+                        {dragging ? "Drop your photo here" : "Drag & drop your room photo"}
+                      </p>
+                      <p className="text-subtle text-sm mt-1">JPG or PNG · up to 20MB</p>
+                    </div>
+                    {!dragging && (
+                      <span className="inline-flex items-center gap-2 mt-2 text-primary font-medium text-sm">
+                        <UploadCloud className="h-4 w-4" /> Browse files
+                      </span>
+                    )}
                   </button>
-                  <span className="absolute bottom-3 left-3 inline-flex items-center gap-1.5 glass !border-white/20 text-white text-sm px-3 py-1.5 rounded-full">
-                    <Check className="h-4 w-4 text-emerald-400" /> {photoFile?.name}
-                  </span>
-                </div>
-              ) : (
-                <button
-                  onClick={() => fileRef.current?.click()}
-                  className="w-full grid place-items-center text-center gap-3 py-16 rounded-3xl border-2 border-dashed border-border-strong hover:border-primary hover:bg-surface-muted/50 transition-all duration-300"
-                >
-                  <div className="grid place-items-center h-16 w-16 rounded-2xl bg-surface-muted text-muted">
-                    <ImageIcon className="h-7 w-7" />
-                  </div>
-                  <div>
-                    <p className="font-medium text-lg">Drag &amp; drop your room photo</p>
-                    <p className="text-subtle text-sm mt-1">JPG or PNG · up to 20MB</p>
-                  </div>
-                  <span className="inline-flex items-center gap-2 mt-2 text-primary font-medium text-sm">
-                    <UploadCloud className="h-4 w-4" /> Browse files
-                  </span>
-                </button>
+                )}
+              </div>
+
+              {photoError && (
+                <p className="flex items-center gap-2 mt-3 text-sm text-rose-500">
+                  <AlertCircle className="h-4 w-4 shrink-0" /> {photoError}
+                </p>
               )}
 
               <div className="grid sm:grid-cols-2 gap-3 mt-5">
