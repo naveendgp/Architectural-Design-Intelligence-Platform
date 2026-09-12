@@ -156,6 +156,11 @@ export const api = {
     }
     return data.photoUrl;
   },
+  // Swap the project's room photo for a different one (user upload).
+  setProjectPhoto: (projectId: string, photoUrl: string) =>
+    send<{ photoUrl: string }>(`/api/projects/${projectId}`, "PATCH", { photoUrl }).then(
+      (r) => r.photoUrl,
+    ),
   // Restore the project's original (pre-edit) room photo.
   revertRoom: (projectId: string) =>
     send<{ photoUrl: string }>("/api/ai/revert-room", "POST", { projectId }).then(

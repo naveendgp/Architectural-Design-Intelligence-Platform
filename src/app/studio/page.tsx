@@ -16,6 +16,7 @@ import {
   Move3d,
   Trash2,
   ImagePlus,
+  RotateCcw,
   X,
   Box,
   Camera,
@@ -142,6 +143,10 @@ function Studio() {
   const [toolsOpen, setToolsOpen] = useState(false);
   // Bumped each time the room analysis lands, so callers can await a fresh one.
   const [analysisNonce, setAnalysisNonce] = useState(0);
+  const roomPhotoInputRef = useRef<HTMLInputElement>(null);
+  // True once the photo differs from the one the project started with.
+  const roomEdited = !!(project?.originalPhotoUrl && project.originalPhotoUrl !== project.photoUrl);
+  const [swappingPhoto, setSwappingPhoto] = useState(false);
   // Surface picker ("Change flooring" / "Change wall panel") and the prompt it
   // hands to the AI bar, which confirms before repainting the photo.
   const [surfaceMenu, setSurfaceMenu] = useState<"floor" | "wall" | null>(null);
@@ -870,6 +875,27 @@ function Studio() {
     onRoomEdited(url);
   }, [projectId, onRoomEdited]);
 
+  /** Replace the room photo with one the user picks. Revert restores the old one. */
+  const changeRoomPhoto = useCallback(
+    async (file: File) => {
+      if (!projectId) return;
+      setSwappingPhoto(true);
+      try {
+        const { url } = await api.uploadFile(file, "rooms");
+        await api.setProjectPhoto(projectId, url);
+        onRoomEdited(url); // clears caches, re-runs analysis for the new room
+      } catch {
+        setNoSpace({
+          title: "Couldn't change the photo",
+          reason: "That image couldn't be uploaded. Try a JPG or PNG of the room.",
+        });
+      } finally {
+        setSwappingPhoto(false);
+      }
+    },
+    [projectId, onRoomEdited],
+  );
+
   // Live drag — update local position only (cheap, runs every pointer move).
   const liveMove = useCallback((id: string, x: number, z: number) => {
     setItems((prev) =>
@@ -1145,6 +1171,18 @@ function Studio() {
           </div>
         )}
 
+        <input
+          ref={roomPhotoInputRef}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = ""; // let the same file be picked again
+            if (f) changeRoomPhoto(f);
+          }}
+        />
+
         {/* Bottom cluster — ONE row, so the room stays the hero. The AI bar is the
             only permanent control; the manual tools live behind its "+" menu. */}
         <div className="absolute inset-x-0 bottom-4 z-30 flex flex-col items-center gap-2 px-4 pointer-events-none">
@@ -1155,7 +1193,7 @@ function Studio() {
             photoUrl={project?.photoUrl}
             onRoomEdited={onRoomEdited}
             onRevert={revertRoom}
-            edited={!!(project?.originalPhotoUrl && project.originalPhotoUrl !== project.photoUrl)}
+            edited={roomEdited}
             capture={captureStage}
             placed={placedSummary}
             capacity={roomCapacity}
@@ -1356,6 +1394,31 @@ function Studio() {
                           setSurfaceMenu("wall");
                         }}
                       />
+                      <ToolItem
+                        icon={
+                          swappingPhoto ? (
+                            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                          ) : (
+                            <ImagePlus className="h-4 w-4" />
+                          )
+                        }
+                        label="Change room photo"
+                        disabled={swappingPhoto}
+                        onClick={() => {
+                          setToolsOpen(false);
+                          roomPhotoInputRef.current?.click();
+                        }}
+                      />
+                      {roomEdited && (
+                        <ToolItem
+                          icon={<RotateCcw className="h-4 w-4" />}
+                          label="Revert room photo"
+                          onClick={() => {
+                            setToolsOpen(false);
+                            revertRoom();
+                          }}
+                        />
+                      )}
                       <ToolItem
                         icon={<Ruler className="h-4 w-4" />}
                         label="Measurements"
