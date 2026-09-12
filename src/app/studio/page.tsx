@@ -23,6 +23,7 @@ import {
   Wallet,
   ChevronDown,
   Ruler,
+  Grid2x2,
   Loader2,
   Shuffle,
   Search,
@@ -72,6 +73,20 @@ const FLOOR_FALLBACK = { posX: 0.5, posZ: 0.72 };
 const CEILING_FALLBACK = { posX: 0.5, posZ: 0.05 };
 // Synthetic id for the not-yet-added piece while we test whether it can fit.
 const PENDING_ID = "__pending__";
+/* Surface presets offered by the "+" menu. Each is a plain-English instruction so
+   the same Gemini image edit handles it as a typed request would. */
+const FLOOR_PRESETS = [
+  { label: "Warm oak wood", swatch: "#b5824a", prompt: "Change the flooring to warm oak wood planks" },
+  { label: "Light grey tile", swatch: "#c9ccce", prompt: "Change the flooring to large light grey floor tiles" },
+  { label: "White marble", swatch: "#eae7e1", prompt: "Change the flooring to polished white marble" },
+  { label: "Dark walnut", swatch: "#5c3a24", prompt: "Change the flooring to dark walnut wood planks" },
+];
+const WALL_PRESETS = [
+  { label: "Warm beige", swatch: "#e3d5c1", prompt: "Change the wall colour to a warm beige" },
+  { label: "Soft white", swatch: "#f4f2ee", prompt: "Change the wall colour to a soft off-white" },
+  { label: "Sage green", swatch: "#9aa88f", prompt: "Change the wall colour to a muted sage green" },
+  { label: "Wood panelling", swatch: "#8a5f3c", prompt: "Change the walls to warm wood panelling" },
+];
 const clampAnchor = (v: number) => Math.min(0.94, Math.max(0.06, v));
 const DEFAULT_CALIB: Calibration = {
   fov: 55,
@@ -125,6 +140,10 @@ function Studio() {
   const [measureMenuOpen, setMeasureMenuOpen] = useState(false);
   // Manual tools live behind the AI bar's "+" so the room isn't walled in by chrome.
   const [toolsOpen, setToolsOpen] = useState(false);
+  // Surface picker ("Change flooring" / "Change wall panel") and the prompt it
+  // hands to the AI bar, which confirms before repainting the photo.
+  const [surfaceMenu, setSurfaceMenu] = useState<"floor" | "wall" | null>(null);
+  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
 
   // Calibration (incl. furniture size) persists per project so fixes stick.
   useEffect(() => {
@@ -1129,14 +1148,17 @@ function Studio() {
             onFitPlan={fitPlan}
             onApplyPlan={addFurnitureBatch}
             roomEmpty={items.length === 0}
+            pendingPrompt={pendingPrompt}
+            onPendingPromptHandled={() => setPendingPrompt(null)}
             tools={
               <div className="relative shrink-0">
-                {(toolsOpen || measureMenuOpen) && (
+                {(toolsOpen || measureMenuOpen || surfaceMenu) && (
                   <button
                     aria-label="Close tools"
                     onClick={() => {
                       setToolsOpen(false);
                       setMeasureMenuOpen(false);
+                      setSurfaceMenu(null);
                     }}
                     className="fixed inset-0 z-0 cursor-default"
                   />
@@ -1144,6 +1166,7 @@ function Studio() {
                 <button
                   onClick={() => {
                     if (measureMenuOpen) setMeasureMenuOpen(false);
+                    if (surfaceMenu) setSurfaceMenu(null);
                     setToolsOpen((o) => !o);
                   }}
                   title="Tools"
@@ -1151,7 +1174,7 @@ function Studio() {
                   aria-expanded={toolsOpen}
                   className={cn(
                     "relative z-10 grid place-items-center h-9 w-9 rounded-xl transition-colors",
-                    toolsOpen || measureMenuOpen
+                    toolsOpen || measureMenuOpen || surfaceMenu
                       ? "bg-primary/10 text-primary"
                       : "text-muted hover:bg-surface-muted hover:text-foreground",
                   )}
@@ -1160,6 +1183,43 @@ function Studio() {
                 </button>
 
                 <AnimatePresence>
+                  {/* Flooring / wall presets — one click sends the AI a request,
+                      which then asks for confirmation before repainting. */}
+                  {surfaceMenu && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 8, scale: 0.97 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 8, scale: 0.97 }}
+                      className="absolute bottom-full left-0 z-10 mb-2 w-60 bg-white dark:bg-zinc-900 border border-border rounded-2xl shadow-[var(--shadow-lg)] p-1.5"
+                    >
+                      <button
+                        onClick={() => {
+                          setSurfaceMenu(null);
+                          setToolsOpen(true);
+                        }}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted hover:text-foreground transition-colors"
+                      >
+                        <ChevronLeft className="h-3.5 w-3.5" /> Tools
+                      </button>
+                      {(surfaceMenu === "floor" ? FLOOR_PRESETS : WALL_PRESETS).map((preset) => (
+                        <ToolItem
+                          key={preset.label}
+                          icon={
+                            <span
+                              className="h-4 w-4 rounded-full border border-black/10 dark:border-white/15"
+                              style={{ background: preset.swatch }}
+                            />
+                          }
+                          label={preset.label}
+                          onClick={() => {
+                            setSurfaceMenu(null);
+                            setPendingPrompt(preset.prompt);
+                          }}
+                        />
+                      ))}
+                    </motion.div>
+                  )}
+
                   {/* Measure options replace the tool list rather than nesting. */}
                   {measureMenuOpen && (
                     <motion.div
@@ -1266,19 +1326,28 @@ function Studio() {
                         }}
                       />
                       <ToolItem
+                        icon={<Grid2x2 className="h-4 w-4" />}
+                        label="Change flooring"
+                        onClick={() => {
+                          setToolsOpen(false);
+                          setSurfaceMenu("floor");
+                        }}
+                      />
+                      <ToolItem
+                        icon={<Paintbrush className="h-4 w-4" />}
+                        label="Change wall panel"
+                        onClick={() => {
+                          setToolsOpen(false);
+                          setSurfaceMenu("wall");
+                        }}
+                      />
+                      <ToolItem
                         icon={<Ruler className="h-4 w-4" />}
                         label="Measurements"
                         onClick={() => {
                           setToolsOpen(false);
                           setMeasureMenuOpen(true);
                         }}
-                      />
-                      <ToolItem
-                        icon={<Paintbrush className="h-4 w-4" />}
-                        label="Wall design"
-                        hint="Soon"
-                        disabled
-                        onClick={() => {}}
                       />
                     </motion.div>
                   )}

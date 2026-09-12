@@ -27,6 +27,10 @@ export type Plan = {
   applied?: boolean;
 };
 
+/** A yes/no (or pick-one) prompt rendered as buttons, so the user never has to
+    guess the wording. Used to confirm changes that replace the room photo. */
+type Action = { label: string; primary?: boolean; run: () => void };
+
 type Msg = {
   id: number;
   role: "user" | "ai";
@@ -34,6 +38,9 @@ type Msg = {
   product?: ProductDTO;
   image?: string;
   plan?: Plan;
+  actions?: Action[];
+  /** Once chosen, the buttons collapse to the label that was picked. */
+  chose?: string;
 };
 
 /** Detect a request to modify the room itself (surfaces), not add furniture. */
@@ -75,6 +82,8 @@ export function StudioChat({
   onApplyPlan,
   tools,
   roomEmpty,
+  pendingPrompt,
+  onPendingPromptHandled,
 }: {
   products: ProductDTO[];
   onAdd: (productId: string) => void;
@@ -99,6 +108,9 @@ export function StudioChat({
   tools?: React.ReactNode;
   /** Openers are only worth screen space while the room is still empty. */
   roomEmpty?: boolean;
+  /** A prompt pushed in from the tool menu (e.g. a flooring preset). */
+  pendingPrompt?: string | null;
+  onPendingPromptHandled?: () => void;
 }) {
   // The bar is always docked; `expanded` only controls the conversation above it.
   const [expanded, setExpanded] = useState(true);
@@ -112,6 +124,14 @@ export function StudioChat({
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, typing, expanded]);
+
+  // The "+" menu can hand us a prompt (a flooring or wall preset); run it once.
+  const sendRef = useRef<(t: string) => void>(() => {});
+  useEffect(() => {
+    if (!pendingPrompt) return;
+    sendRef.current(pendingPrompt);
+    onPendingPromptHandled?.();
+  }, [pendingPrompt, onPendingPromptHandled]);
 
   const reply = (msg: Omit<Msg, "id" | "role">) => {
     setTyping(true);
@@ -145,16 +165,70 @@ export function StudioChat({
     }
 
     // Room edit (wallpaper, curtains, paint, flooring…) — Gemini image editing.
+    // This repaints the base photo, so confirm before spending ~20s on it.
     if (isRoomEdit(t)) {
       if (!projectId || !photoUrl || !onRoomEdited) {
         reply({ text: "I can edit the room once it's fully loaded — give it a moment and try again." });
         return;
       }
-      setBusy(true);
-      setBusyLabel("Editing the room… (~15–25s)");
+      const id = Date.now() + 1;
       setTyping(true);
+      setTimeout(() => {
+        setTyping(false);
+        setMessages((m) => [
+          ...m,
+          {
+            id,
+            role: "ai",
+            text: `I'll repaint the room for that — “${raw}”. It becomes the new base photo (your furniture stays put, and you can revert any time).`,
+            actions: [
+              { label: "Make the change", primary: true, run: () => runRoomEdit(id, raw) },
+              {
+                label: "Cancel",
+                run: () =>
+                  setMessages((m) =>
+                    m.map((msg) => (msg.id === id ? { ...msg, chose: "Cancelled", actions: undefined } : msg)),
+                  ),
+              },
+            ],
+          },
+        ]);
+      }, 400);
+      return;
+    }
+
+    // Ambient lighting change (not adding a lamp) — not built yet.
+    if (/\b(warmer|dimmer|brighter|cozier|cozy|mood|ambient)\b/.test(t) && /\blight/.test(t)) {
+      reply({
+        text: "Ambient lighting adjustments are coming soon. I can place a lamp if you have one — try “add a lamp”.",
+      });
+      return;
+    }
+
+    if (products.length === 0) {
+      reply({
+        text: "Your marketplace is empty. Upload a 3D model in Settings → Upload 3D Model, then I can place it for you.",
+      });
+      return;
+    }
+
+    await runDesign(raw);
+  };
+
+  sendRef.current = send;
+
+  /** Actually perform a confirmed room edit. */
+  const runRoomEdit = async (msgId: number, instruction: string) => {
+    if (!projectId || !photoUrl || !onRoomEdited || busy) return;
+    setMessages((m) =>
+      m.map((msg) => (msg.id === msgId ? { ...msg, chose: "Making the change", actions: undefined } : msg)),
+    );
+    setBusy(true);
+    setBusyLabel("Repainting the room… (~15–25s)");
+    setTyping(true);
+    {
       try {
-        const newUrl = await api.editRoom(projectId, photoUrl, raw);
+        const newUrl = await api.editRoom(projectId, photoUrl, instruction);
         onRoomEdited(newUrl);
         setTyping(false);
         setMessages((m) => [
@@ -162,7 +236,7 @@ export function StudioChat({
           {
             id: Date.now() + 1,
             role: "ai",
-            text: `Done — I've updated the room (“${raw}”). This is now your base image, so any furniture you add or render sits on the new look. Ask for another change, or start adding furniture.`,
+            text: `Done — the room is repainted. This is now your base photo, so anything you add or render sits on the new look.`,
             image: newUrl,
           },
         ]);
@@ -184,23 +258,12 @@ export function StudioChat({
         setBusy(false);
         setBusyLabel(undefined);
       }
-      return;
     }
+  };
 
-    // Ambient lighting change (not adding a lamp) — not built yet.
-    if (/\b(warmer|dimmer|brighter|cozier|cozy|mood|ambient)\b/.test(t) && /\blight/.test(t)) {
-      reply({
-        text: "Ambient lighting adjustments are coming soon. I can place a lamp if you have one — try “add a lamp”.",
-      });
-      return;
-    }
-
-    if (products.length === 0) {
-      reply({
-        text: "Your marketplace is empty. Upload a 3D model in Settings → Upload 3D Model, then I can place it for you.",
-      });
-      return;
-    }
+  /** Place a single named piece, or ask Gemini to design the whole space. */
+  const runDesign = async (raw: string) => {
+    const t = raw.toLowerCase();
 
     // Unambiguous single add — place it straight away, no AI round-trip.
     const direct = directAdd(t, products);
@@ -450,7 +513,7 @@ export function StudioChat({
       <div className="pointer-events-auto w-[min(780px,100%)]">
         <div className="flex items-end gap-2 pl-3 pr-2 py-2 rounded-[20px] bg-surface/95 backdrop-blur-2xl border border-border shadow-[var(--shadow-lg)] focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10 transition-all">
           <span className="grid place-items-center h-8 w-8 rounded-full brand-gradient text-white shrink-0">
-            <Sparkles className="h-4 w-4" />
+            <Sparkles className="h-4 w-4" />  
           </span>
 
           {tools}
@@ -470,7 +533,7 @@ export function StudioChat({
             placeholder={
               busy
                 ? busyLabel ?? "Working…"
-                : "Describe the space you want — I'll design it from your marketplace"
+                : "Describe the space you want - I'll design it from the marketplace"
             }
             aria-label="Message"
             className="flex-1 resize-none bg-transparent py-2 outline-none text-sm placeholder:text-subtle max-h-28 disabled:opacity-60"
@@ -618,6 +681,31 @@ function Bubble({
       </span>
       <div className="max-w-[85%] min-w-0">
         <div className="text-sm leading-relaxed text-foreground">{msg.text}</div>
+
+        {/* Confirmations answer with a click, never by typing the right words. */}
+        {msg.actions && msg.actions.length > 0 && (
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
+            {msg.actions.map((a) => (
+              <button
+                key={a.label}
+                onClick={a.run}
+                disabled={busy}
+                className={cn(
+                  "h-9 px-4 rounded-xl text-[13px] font-semibold transition-all active:scale-[0.98] disabled:opacity-50",
+                  a.primary
+                    ? "brand-gradient text-white shadow-[var(--shadow-glow)]"
+                    : "border border-border bg-surface hover:bg-surface-muted",
+                )}
+              >
+                {a.label}
+              </button>
+            ))}
+          </div>
+        )}
+        {msg.chose && (
+          <p className="mt-2 text-[12px] font-medium text-muted">✓ {msg.chose}</p>
+        )}
+
         {msg.plan && <PlanCard plan={msg.plan} busy={busy} onApply={onApply} />}
         {msg.image && (
           <div className="mt-2 rounded-xl overflow-hidden border border-border w-full">
