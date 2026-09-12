@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Sparkles, X, ArrowUp, Plus, Wand2, RotateCcw } from "lucide-react";
+import { Sparkles, ArrowUp, Plus, Wand2, RotateCcw, ChevronDown } from "lucide-react";
 import { cn, formatINR } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { ProductDTO } from "@/lib/types";
@@ -94,7 +94,8 @@ export function StudioChat({
     entries: { productId: string; qty: number }[],
   ) => Promise<{ added: number; skipped: string[] }>;
 }) {
-  const [open, setOpen] = useState(false);
+  // The bar is always docked; `expanded` only controls the conversation above it.
+  const [expanded, setExpanded] = useState(true);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState(false);
@@ -104,7 +105,7 @@ export function StudioChat({
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, typing, open]);
+  }, [messages, typing, expanded]);
 
   const reply = (msg: Omit<Msg, "id" | "role">) => {
     setTyping(true);
@@ -120,6 +121,7 @@ export function StudioChat({
     const t = raw.toLowerCase();
     setMessages((m) => [...m, { id: Date.now(), role: "user", text: raw }]);
     setInput("");
+    setExpanded(true); // any new exchange pulls the conversation back into view
 
     // Revert the room to its original photo.
     if (onRevert && /\b(revert|undo|reset|original)\b/.test(t) && /\b(room|wall|change|photo|edit|it)\b/.test(t)) {
@@ -340,70 +342,43 @@ export function StudioChat({
     }
   };
 
-  const designActions =
-    capture && onApplyPlan
+  /* A short, mixed set of openers: design first (the headline capability), then a
+     restyle, so the bar advertises both without becoming a menu. Labels stay
+     chip-sized; the prompt actually sent is the fuller sentence. */
+  const suggestions: { label: string; prompt: string }[] = [
+    ...(capture && onApplyPlan
       ? [
-          "Turn this into a modern office waiting area",
-          "Furnish this as a cosy living room under ₹2 lakh",
-          "Add enough seating and lighting for this space",
+          { label: "Office waiting area", prompt: "Turn this into a modern office waiting area" },
+          { label: "Under ₹2 lakh", prompt: "Furnish this room well, keeping everything under ₹2 lakh" },
         ]
-      : [];
-  const restyleActions = onRoomEdited
-    ? ["Change the wallpaper to warm beige", "Remove the curtains", "Change the flooring to wood"]
-    : [];
-  const furnitureActions = products.slice(0, 3);
+      : []),
+    ...(onRoomEdited
+      ? [{ label: "Warm beige walls", prompt: "Change the wallpaper to warm beige" }]
+      : []),
+  ];
   const empty = messages.length === 0;
 
   return (
-    <>
+    /* The studio's primary control. Positioning is owned by the page's bottom
+       cluster so the manual tool dock stacks above this instead of overlapping
+       it; here we only lay out conversation → suggestions → prompt bar. */
+    <div className="w-full flex flex-col items-center gap-2 pointer-events-none">
+      {/* Conversation — only once there is something to show */}
       <AnimatePresence>
-        {!open && (
-          <motion.button
-            initial={{ scale: 0.9, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.9, opacity: 0 }}
-            onClick={() => setOpen(true)}
-            className="absolute bottom-6 right-6 z-30 flex items-center gap-2.5 h-12 pl-2 pr-4 rounded-full bg-surface/90 backdrop-blur-xl border border-border shadow-[var(--shadow-lg)] hover:border-primary/40 transition-all"
-          >
-            <span className="grid place-items-center h-8 w-8 rounded-full brand-gradient text-white shrink-0">
-              <Sparkles className="h-[18px] w-[18px]" />
-            </span>
-            <span className="font-medium text-sm hidden sm:block">Design with AI</span>
-          </motion.button>
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {open && (
+        {expanded && !empty && (
           <motion.div
-            initial={{ opacity: 0, y: 20, scale: 0.98 }}
+            initial={{ opacity: 0, y: 12, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 20, scale: 0.98 }}
-            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-            className="absolute bottom-6 right-6 z-30 flex flex-col w-[min(400px,calc(100%-2rem))] h-[min(600px,calc(100%-6.5rem))] rounded-[26px] bg-surface/95 backdrop-blur-2xl border border-border shadow-2xl overflow-hidden"
+            exit={{ opacity: 0, y: 12, scale: 0.98 }}
+            transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+            className="pointer-events-auto w-[min(780px,100%)] rounded-[22px] bg-surface/95 backdrop-blur-2xl border border-border shadow-2xl overflow-hidden"
           >
-            <div className="flex items-center gap-3 px-5 h-14 border-b border-border/70 shrink-0">
-              <span className="grid place-items-center h-8 w-8 rounded-full brand-gradient text-white shrink-0">
-                <Sparkles className="h-4 w-4" />
+            <div className="flex items-center gap-2.5 px-4 h-12 border-b border-border/70 shrink-0">
+              <span className="grid place-items-center h-7 w-7 rounded-full brand-gradient text-white shrink-0">
+                <Sparkles className="h-3.5 w-3.5" />
               </span>
-              <div className="min-w-0 flex-1">
-                <p className="font-semibold tracking-tight leading-tight text-[15px]">AI Designer</p>
-                <p className="text-[11px] text-subtle leading-tight tracking-wide">Restyle · Furniture · Render</p>
-              </div>
-              <button
-                onClick={() => setOpen(false)}
-                aria-label="Close"
-                className="grid place-items-center h-8 w-8 rounded-full text-muted hover:bg-surface-muted transition-colors"
-              >
-                <X className="h-[18px] w-[18px]" />
-              </button>
-            </div>
-
-            {/* Edited-room banner with one-tap revert */}
-            {edited && onRevert && (
-              <div className="flex items-center gap-2 px-4 py-2 bg-primary/5 border-b border-border shrink-0">
-                <Wand2 className="h-3.5 w-3.5 text-primary shrink-0" />
-                <span className="text-xs text-muted flex-1 min-w-0 truncate">Room has AI edits applied</span>
+              <p className="font-semibold tracking-tight text-sm flex-1 min-w-0">AI Designer</p>
+              {edited && onRevert && (
                 <button
                   onClick={async () => {
                     if (busy) return;
@@ -422,129 +397,96 @@ export function StudioChat({
                 >
                   <RotateCcw className="h-3 w-3" /> Revert
                 </button>
-              </div>
-            )}
-
-            <div className="flex-1 overflow-y-auto px-4 py-4">
-              {empty ? (
-                <div className="h-full flex flex-col">
-                  <div className="grid place-items-center h-11 w-11 rounded-2xl brand-gradient text-white mx-auto mb-3 mt-2">
-                    <Sparkles className="h-[22px] w-[22px]" />
-                  </div>
-                  <p className="text-center font-semibold">How should we design this room?</p>
-                  <p className="text-center text-[13px] text-muted mt-1 mb-4">
-                    Describe the space you want — I'll pick the furniture.
-                  </p>
-
-                  {designActions.length > 0 && (
-                    <div className="mb-4">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-subtle mb-2 flex items-center gap-1.5">
-                        <Sparkles className="h-3 w-3" /> Design the space
-                      </p>
-                      <div className="space-y-1.5">
-                        {designActions.map((label) => (
-                          <button
-                            key={label}
-                            onClick={() => send(label)}
-                            className="w-full text-left px-3 py-2 rounded-xl border border-border bg-surface text-[13px] hover:border-primary/50 hover:bg-primary/5 transition-colors"
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {restyleActions.length > 0 && (
-                    <div className="mb-4">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-subtle mb-2 flex items-center gap-1.5">
-                        <Wand2 className="h-3 w-3" /> Restyle the room
-                      </p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {restyleActions.map((label) => (
-                          <button
-                            key={label}
-                            onClick={() => send(label)}
-                            className="px-2.5 h-8 rounded-full border border-border bg-surface text-xs font-medium hover:border-primary/50 hover:bg-primary/5 transition-colors"
-                          >
-                            {label.replace(/^(Change the |Remove the )/, "")}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {furnitureActions.length > 0 && (
-                    <div>
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-subtle mb-2 flex items-center gap-1.5">
-                        <Plus className="h-3 w-3" /> Add furniture
-                      </p>
-                      <div className="space-y-1.5">
-                        {furnitureActions.map((p) => (
-                          <button
-                            key={p.id}
-                            onClick={() => send(`Add ${p.name}`)}
-                            className="w-full flex items-center gap-2.5 p-1.5 rounded-xl border border-border bg-surface text-left hover:bg-surface-muted transition-colors"
-                          >
-                            <span className="relative h-8 w-8 rounded-lg overflow-hidden shrink-0 bg-surface-muted">
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={p.thumbnailUrl} alt="" className="h-full w-full object-cover" />
-                            </span>
-                            <span className="text-sm font-medium flex-1 truncate">{p.name}</span>
-                            <span className="text-xs text-primary font-semibold shrink-0 pr-1">{formatINR(p.priceInr)}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {messages.map((m) => (
-                    <Bubble
-                      key={m.id}
-                      msg={m}
-                      busy={busy}
-                      onApply={m.plan ? () => applyPlan(m.id, m.plan!) : undefined}
-                    />
-                  ))}
-                  {typing && <Typing label={busyLabel} />}
-                  <div ref={endRef} />
-                </div>
               )}
+              <button
+                onClick={() => setExpanded(false)}
+                aria-label="Collapse conversation"
+                className="grid place-items-center h-7 w-7 rounded-full text-muted hover:bg-surface-muted transition-colors shrink-0"
+              >
+                <ChevronDown className="h-4 w-4" />
+              </button>
             </div>
 
-            <div className="px-4 pb-4 pt-2 shrink-0">
-              <div className="flex items-end gap-2 pl-4 pr-1.5 py-1.5 rounded-2xl bg-surface-muted border border-border focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10 transition-all">
-                <textarea
-                  rows={1}
-                  value={input}
-                  disabled={busy}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      send(input);
-                    }
-                  }}
-                  placeholder={busy ? "Working…" : "Describe a change or a piece to add…"}
-                  aria-label="Message"
-                  className="flex-1 resize-none bg-transparent py-2 outline-none text-sm placeholder:text-subtle max-h-24 disabled:opacity-60"
+            <div className="max-h-[min(46vh,440px)] overflow-y-auto px-4 py-4 space-y-4">
+              {messages.map((m) => (
+                <Bubble
+                  key={m.id}
+                  msg={m}
+                  busy={busy}
+                  onApply={m.plan ? () => applyPlan(m.id, m.plan!) : undefined}
                 />
-                <button
-                  aria-label="Send"
-                  onClick={() => send(input)}
-                  disabled={!input.trim() || busy}
-                  className="grid place-items-center h-9 w-9 rounded-xl brand-gradient text-white shadow-[var(--shadow-glow)] disabled:opacity-40 disabled:shadow-none transition-all shrink-0 active:scale-95"
-                >
-                  <ArrowUp className="h-[18px] w-[18px]" />
-                </button>
-              </div>
+              ))}
+              {typing && <Typing label={busyLabel} />}
+              <div ref={endRef} />
             </div>
           </motion.div>
         )}
       </AnimatePresence>
-    </>
+
+      {/* Suggestions — shown before the first message, so the bar reads as capable */}
+      {empty && suggestions.length > 0 && (
+        <div className="pointer-events-auto w-[min(780px,100%)] flex flex-wrap justify-center gap-1.5">
+          {suggestions.map((s) => (
+            <button
+              key={s.label}
+              onClick={() => send(s.prompt)}
+              disabled={busy}
+              className="px-3 h-8 rounded-full bg-surface/90 backdrop-blur-xl border border-border text-xs font-medium hover:border-primary/50 hover:bg-primary/5 transition-colors disabled:opacity-50"
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* The prompt bar itself — the widest, most prominent control on screen */}
+      <div className="pointer-events-auto w-[min(780px,100%)]">
+        <div className="flex items-end gap-2 pl-3 pr-2 py-2 rounded-[20px] bg-surface/95 backdrop-blur-2xl border border-border shadow-[var(--shadow-lg)] focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10 transition-all">
+          <span className="grid place-items-center h-9 w-9 rounded-full brand-gradient text-white shrink-0">
+            <Sparkles className="h-[18px] w-[18px]" />
+          </span>
+
+          <textarea
+            rows={1}
+            value={input}
+            disabled={busy}
+            onChange={(e) => setInput(e.target.value)}
+            onFocus={() => !empty && setExpanded(true)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                send(input);
+              }
+            }}
+            placeholder={
+              busy
+                ? busyLabel ?? "Working…"
+                : "Describe the space you want — I'll design it from your marketplace"
+            }
+            aria-label="Message"
+            className="flex-1 resize-none bg-transparent py-2 outline-none text-sm placeholder:text-subtle max-h-28 disabled:opacity-60"
+          />
+
+          {!empty && !expanded && (
+            <button
+              onClick={() => setExpanded(true)}
+              className="h-9 px-3 rounded-xl text-xs font-medium text-muted hover:bg-surface-muted transition-colors shrink-0"
+            >
+              {messages.length} message{messages.length === 1 ? "" : "s"}
+            </button>
+          )}
+
+          <button
+            aria-label="Send"
+            onClick={() => send(input)}
+            disabled={!input.trim() || busy}
+            className="grid place-items-center h-10 w-10 rounded-2xl brand-gradient text-white shadow-[var(--shadow-glow)] disabled:opacity-40 disabled:shadow-none transition-all shrink-0 active:scale-95"
+          >
+            <ArrowUp className="h-5 w-5" />
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

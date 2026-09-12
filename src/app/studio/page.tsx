@@ -1094,11 +1094,11 @@ function Studio() {
 
             {items.length === 0 && (
               <div className="absolute inset-x-0 top-32 grid place-items-center pointer-events-none">
-                <div className="glass border border-border rounded-2xl px-5 py-3 text-sm text-center max-w-xs">
+                <div className="glass border border-border rounded-2xl px-5 py-3 text-sm text-center max-w-sm">
                   <p className="font-medium">Your room is ready</p>
                   <p className="text-muted mt-0.5">
-                    Tap <span className="font-medium">Add Furniture</span> — it
-                    auto-seats on the floor, then drag it anywhere.
+                    Tell the AI below what you want this space to become — it
+                    designs it from your marketplace and seats everything on the floor.
                   </p>
                 </div>
               </div>
@@ -1110,9 +1110,11 @@ function Studio() {
           </div>
         )}
 
-        {/* Floating glass dock */}
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20">
-          <div className="glass border border-border rounded-2xl shadow-[var(--shadow-lg)] px-2 py-2 flex items-center gap-1">
+        {/* Bottom cluster: manual tools stacked above the AI bar. One flow column
+            so the suggestion chips can never overlap the dock, and the AI prompt
+            always reads as the widest, most prominent control in the studio. */}
+        <div className="absolute inset-x-0 bottom-4 z-30 flex flex-col items-center gap-2 px-4 pointer-events-none">
+          <div className="glass border border-border rounded-xl shadow-[var(--shadow-lg)] px-1.5 py-1.5 flex items-center gap-0.5 scale-90 origin-bottom pointer-events-auto">
             <button
               onClick={() => {
                 setAddFilter("all");
@@ -1234,23 +1236,23 @@ function Studio() {
               <span className="hidden md:block">Walls</span>
             </button>
           </div>
-        </div>
 
-        {/* AI design chat — reads the room, designs it from the marketplace */}
-        <StudioChat
-          products={products}
-          onAdd={addFurniture}
-          projectId={projectId ?? undefined}
-          photoUrl={project?.photoUrl}
-          onRoomEdited={onRoomEdited}
-          onRevert={revertRoom}
-          edited={!!(project?.originalPhotoUrl && project.originalPhotoUrl !== project.photoUrl)}
-          capture={captureStage}
-          placed={placedSummary}
-          capacity={roomCapacity}
-          onFitPlan={fitPlan}
-          onApplyPlan={addFurnitureBatch}
-        />
+          {/* AI design bar — reads the room, designs it from the marketplace */}
+          <StudioChat
+            products={products}
+            onAdd={addFurniture}
+            projectId={projectId ?? undefined}
+            photoUrl={project?.photoUrl}
+            onRoomEdited={onRoomEdited}
+            onRevert={revertRoom}
+            edited={!!(project?.originalPhotoUrl && project.originalPhotoUrl !== project.photoUrl)}
+            capture={captureStage}
+            placed={placedSummary}
+            capacity={roomCapacity}
+            onFitPlan={fitPlan}
+            onApplyPlan={addFurnitureBatch}
+          />
+        </div>
 
         {/* Photorealistic render of the composited scene */}
         {project && (
