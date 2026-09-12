@@ -27,6 +27,8 @@ export type Plan = {
   applied?: boolean;
   /** Restyle directions the user can pick between, tailored to their brief. */
   surfaceOptions?: { label: string; instruction: string; reason: string }[] | null;
+  /** Removing the room's existing dated furniture — asked separately. */
+  clearInstruction?: string | null;
 };
 
 /** A yes/no (or pick-one) prompt rendered as buttons, so the user never has to
@@ -86,6 +88,7 @@ export function StudioChat({
   roomEmpty,
   pendingPrompt,
   onPendingPromptHandled,
+  analysisNonce,
 }: {
   products: ProductDTO[];
   /** Places one piece. Resolves false when the room has no space for it. */
@@ -114,6 +117,8 @@ export function StudioChat({
   /** A prompt pushed in from the tool menu (e.g. a flooring preset). */
   pendingPrompt?: string | null;
   onPendingPromptHandled?: () => void;
+  /** Increments when the studio finishes measuring the room. */
+  analysisNonce?: number;
 }) {
   // The bar is always docked; `expanded` only controls the conversation above it.
   const [expanded, setExpanded] = useState(true);
@@ -127,6 +132,12 @@ export function StudioChat({
   // pushed within the same millisecond, duplicating React keys.
   const idRef = useRef(0);
   const nextId = () => ++idRef.current;
+
+  // Mirror of the analysis counter so an async flow can await the next one.
+  const analysisRef = useRef(analysisNonce ?? 0);
+  useEffect(() => {
+    analysisRef.current = analysisNonce ?? 0;
+  }, [analysisNonce]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -271,6 +282,47 @@ export function StudioChat({
     return ok;
   };
 
+  /* "Make it modern" often carries an unspoken "and get rid of the old stuff" —
+     but their sofa might be staying, so ask rather than assume. Answering merges
+     the two instructions into ONE edit, so it still costs a single image call. */
+  const askAboutClearing = (plan: Plan, styleInstruction: string) => {
+    const clear = plan.clearInstruction;
+    if (!clear) {
+      restyleThenFurnish(nextId(), plan, styleInstruction);
+      return;
+    }
+    const id = nextId();
+    setMessages((m) => [
+      ...m,
+      {
+        id,
+        role: "ai",
+        text: `One thing before I start — ${clear.replace(/^remove /i, "should I also clear out ").replace(/\.$/, "")}? I can do it in the same pass.`,
+        actions: [
+          {
+            label: "Yes, clear them out",
+            primary: true,
+            run: () => {
+              setMessages((mm) =>
+                mm.map((x) => (x.id === id ? { ...x, chose: "Clearing them out", actions: undefined } : x)),
+              );
+              restyleThenFurnish(id, plan, `${styleInstruction.replace(/\.$/, "")}, and ${clear}`);
+            },
+          },
+          {
+            label: "No, keep them",
+            run: () => {
+              setMessages((mm) =>
+                mm.map((x) => (x.id === id ? { ...x, chose: "Keeping the existing furniture", actions: undefined } : x)),
+              );
+              restyleThenFurnish(id, plan, styleInstruction);
+            },
+          },
+        ],
+      },
+    ]);
+  };
+
   /* Room first, furniture second. After the repaint the photo is new, so the
      studio re-runs its room analysis — wait for that before placing, otherwise
      the layout is packed against the floor of a room that no longer exists. */
@@ -278,10 +330,18 @@ export function StudioChat({
     const ok = await runRoomEdit(msgId, instruction);
     if (!ok) return;
 
+    /* Wait for the room to actually be re-measured. A fixed delay was not enough:
+       placement then ran with no floor calibration and no known obstacles, and
+       dropped a sofa straight on top of the wheelchair. */
     setBusy(true);
     setBusyLabel("Re-reading the new room…");
     setTyping(true);
-    await new Promise((r) => setTimeout(r, 3500));
+    const before = analysisRef.current;
+    const deadline = Date.now() + 30000;
+    while (analysisRef.current === before && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    await new Promise((r) => setTimeout(r, 400)); // let the state settle into props
     setTyping(false);
     setBusy(false);
     setBusyLabel(undefined);
@@ -431,6 +491,7 @@ export function StudioChat({
         droppedForSpace,
         items,
         surfaceOptions: plan.surfaceOptions,
+        clearInstruction: plan.clearInstruction,
       };
 
       /* Order matters: finish the room, THEN furnish it. Placing first meant the
@@ -458,7 +519,7 @@ export function StudioChat({
                     setMessages((mm) =>
                       mm.map((x) => (x.id === msgId ? { ...x, chose: o.label, actions: undefined } : x)),
                     );
-                    restyleThenFurnish(msgId, planData, o.instruction);
+                    askAboutClearing(planData, o.instruction);
                   },
                 })),
                 {
@@ -592,9 +653,13 @@ export function StudioChat({
                   key={m.id}
                   msg={m}
                   busy={busy}
-                  // While a style choice is pending, the card's own Add button would
-                  // let the user skip the room step entirely — so hide it.
-                  onApply={m.plan && !m.actions ? () => applyPlan(m.id, m.plan!) : undefined}
+                  /* Hide the card's own Add button while a choice is pending — it
+                     would skip the room step — and also once one has been made,
+                     since clearing `actions` would otherwise re-expose it and let
+                     the same plan be added twice. */
+                  onApply={
+                    m.plan && !m.actions && !m.chose ? () => applyPlan(m.id, m.plan!) : undefined
+                  }
                 />
               ))}
               {typing && <Typing label={busyLabel} />}

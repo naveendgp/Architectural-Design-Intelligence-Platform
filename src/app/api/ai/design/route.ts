@@ -102,6 +102,7 @@ export async function POST(req: Request) {
       intent: plan.intent,
       reply: plan.reply,
       surfaceOptions: plan.surfaceOptions ?? null,
+      clearInstruction: plan.clearInstruction ?? null,
       offTopic: plan.offTopic,
       budgetInr: plan.budgetInr,
       totalInr,

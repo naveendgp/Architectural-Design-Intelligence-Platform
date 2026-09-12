@@ -113,6 +113,7 @@ export const api = {
       trimmed?: boolean;
       items?: { product: ProductDTO; qty: number; reason: string; subtotalInr: number }[];
       surfaceOptions?: { label: string; instruction: string; reason: string }[] | null;
+      clearInstruction?: string | null;
       error?: string;
       code?: string;
     };
@@ -132,6 +133,7 @@ export const api = {
       trimmed: data.trimmed === true,
       items: data.items ?? [],
       surfaceOptions: data.surfaceOptions ?? null,
+      clearInstruction: data.clearInstruction ?? null,
     };
   },
   // AI: edit the room's base photo (wallpaper, curtains, paint, flooring…) and set it

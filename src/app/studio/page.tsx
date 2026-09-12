@@ -140,6 +140,8 @@ function Studio() {
   const [measureMenuOpen, setMeasureMenuOpen] = useState(false);
   // Manual tools live behind the AI bar's "+" so the room isn't walled in by chrome.
   const [toolsOpen, setToolsOpen] = useState(false);
+  // Bumped each time the room analysis lands, so callers can await a fresh one.
+  const [analysisNonce, setAnalysisNonce] = useState(0);
   // Surface picker ("Change flooring" / "Change wall panel") and the prompt it
   // hands to the AI bar, which confirms before repainting the photo.
   const [surfaceMenu, setSurfaceMenu] = useState<"floor" | "wall" | null>(null);
@@ -253,6 +255,10 @@ function Studio() {
     const applyAnalysis = (a: { objects: FloorObjectBox[]; floorTop: number[]; ceilingBottom: number[] }) => {
       setSceneCalib({ floorTop: a.floorTop, ceilingBottom: a.ceilingBottom });
       setRealObjects(a.objects); // state change re-renders the scene with the new calib
+      // Signals "this room has been measured". The AI bar waits on this before
+      // furnishing a freshly restyled room — placing beforehand meant no floor
+      // calibration and no known obstacles, so pieces landed on top of things.
+      setAnalysisNonce((n) => n + 1);
     };
     const cached = typeof window !== "undefined" ? window.localStorage.getItem(cacheKey) : null;
     if (cached) {
@@ -1156,6 +1162,7 @@ function Studio() {
             onFitPlan={fitPlan}
             onApplyPlan={addFurnitureBatch}
             roomEmpty={items.length === 0}
+            analysisNonce={analysisNonce}
             pendingPrompt={pendingPrompt}
             onPendingPromptHandled={() => setPendingPrompt(null)}
             tools={

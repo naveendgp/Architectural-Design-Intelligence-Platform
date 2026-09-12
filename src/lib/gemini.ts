@@ -217,6 +217,11 @@ export type DesignPlan = {
   budgetInr: number;
   /** True when the request wasn't about furniture at all (chat falls back). */
   offTopic: boolean;
+  /** Removing the room's existing dated furniture, when the photo has some. Kept
+      separate from the style directions because it is the user's call: someone
+      asking to "make it modern" often means clear the old stuff out too, but
+      never assume it — their sofa may be staying. */
+  clearInstruction?: string;
   /** Distinct restyle directions for the room's surfaces, tailored to the brief —
       e.g. for "modern": a pared-back take and a richer one. The user picks a
       direction rather than answering yes/no. Each instruction is self-contained
@@ -338,6 +343,9 @@ RULES:
       e.g. "Change the walls to soft off-white, change the flooring to warm oak
       planks, remove the framed photo collage from the wall, and remove the
       patterned ceiling trim".
+    - Include WINDOW TREATMENTS where the windows are bare or the existing
+      curtains are dated — well-made drapes or sheers in keeping with the
+      direction. A bare window is one of the strongest "unfinished room" signals.
     - Do NOT ask to remove or alter anything the user might want kept, such as
       windows, doors, or built-in structure.
     - reason: a short phrase on what that direction gives the room.
@@ -346,6 +354,13 @@ RULES:
   specific piece ("add a reading chair"), just add the piece — redecorating the
   room is not what they asked for. Also leave it out when the existing floor and
   walls already suit the brief.
+- CLEARING OUT: if the photo still contains the user's own dated or mismatched
+  FURNITURE (an old armchair, a bulky TV cabinet, plastic stools), put a literal
+  instruction to remove those specific items in "clearInstruction", naming each
+  one. Someone asking to modernise a room often wants the old pieces gone but
+  does not think to say so — we will ask them. Never include people, mobility
+  aids, windows, doors or structure. Omit the field when there is nothing dated
+  to clear.
 - reply: 1-2 friendly sentences describing the design you're proposing. Do NOT
   list prices or quantities in the reply — the UI renders those separately.
 - intent: a 2-5 word label of what you understood, e.g. "Modern office waiting area".
@@ -359,6 +374,7 @@ RULES:
       reply: { type: "string" },
       budgetInr: { type: "number", description: "rupees, 0 if not specified" },
       offTopic: { type: "boolean" },
+      clearInstruction: { type: "string" },
       surfaceOptions: {
         type: "array",
         description: "2-3 distinct restyle directions; omit when not needed.",
@@ -415,7 +431,13 @@ RULES:
     .filter((o) => o.label && o.instruction)
     .slice(0, 3);
 
+  const clearInstruction =
+    typeof parsed.clearInstruction === "string" && parsed.clearInstruction.trim()
+      ? parsed.clearInstruction.trim()
+      : undefined;
+
   return {
+    clearInstruction,
     surfaceOptions: surfaceOptions.length ? surfaceOptions : undefined,
     intent: typeof parsed.intent === "string" ? parsed.intent : "",
     reply: typeof parsed.reply === "string" ? parsed.reply : "",
