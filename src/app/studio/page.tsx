@@ -256,7 +256,10 @@ function Studio() {
     // Keyed on the PHOTO, not just the project: a restyle produces a new photo,
     // and reusing the old analysis kept furniture the edit had already removed as
     // phantom floor obstacles — which reported a cleared room as 0m² free.
-    const cacheKey = `roomAnalysis:${projectId}:${url}`;
+    /* v2: entries cached before the analysis measured room depth carry no
+       nearDepthM/farDepthM, so replaying one would silently skip the depth
+       calibration and keep furniture mis-scaled. Bumping the prefix retires them. */
+    const cacheKey = `roomAnalysis2:${projectId}:${url}`;
     const applyAnalysis = (a: {
       objects: FloorObjectBox[];
       floorTop: number[];
@@ -875,7 +878,9 @@ function Studio() {
           // Analyses are keyed per photo, so drop every one for this project —
           // including entries left by earlier edits.
           for (const k of Object.keys(window.localStorage)) {
-            if (k.startsWith(`roomAnalysis:${projectId}`)) window.localStorage.removeItem(k);
+            if (k.startsWith(`roomAnalysis:${projectId}`) || k.startsWith(`roomAnalysis2:${projectId}`)) {
+              window.localStorage.removeItem(k);
+            }
           }
           for (let i = 0; i <= 12; i++) window.localStorage.removeItem(`lightInsight:${projectId}:${i}`);
         } catch {
