@@ -335,14 +335,26 @@ RULES:
     - instruction: name EVERY change the room needs to actually reach the look,
       as one explicit list. Repainting a wall alone rarely transforms a dated
       room — look at the photo and say what is holding it back. Cover, where
-      they apply: wall colour/finish, flooring, and the REMOVAL of specific
-      dated or cluttering things you can see (e.g. "remove the framed photo
-      collage from the wall", "remove the old TV cabinet", "remove the gold
-      ceiling trim"). Name each item literally and specifically, because a
-      strict photo editor executes exactly this list and nothing else.
-      e.g. "Change the walls to soft off-white, change the flooring to warm oak
-      planks, remove the framed photo collage from the wall, and remove the
-      patterned ceiling trim".
+      they apply: flooring, wall finish, ceiling treatment, architectural
+      lighting, and the REMOVAL of specific dated or cluttering things you can
+      see. Name each item literally, because a strict photo editor executes
+      exactly this list and nothing else.
+    - SPECIFY MATERIALS, NOT COLOURS. "Paint the walls beige" is decorating; a
+      designer specifies a finish. Say what the surface IS: polished marble or
+      large-format porcelain flooring with real reflections, full-height walnut
+      or oak veneer wall panelling, fluted wood, microcement, a stone feature
+      wall, a coffered or stepped ceiling, recessed cove lighting and linear LED
+      profiles, brass or blackened-metal trim, full-height drapery.
+    - MATCH THE AMBITION TO THE BRIEF. If the user asked for luxurious, premium,
+      executive or high-end, the materials must read that way — stone, timber
+      veneer, metal, layered architectural light. A minimal or budget brief gets
+      restrained finishes instead. Under-delivering on a luxury brief is as
+      wrong as over-decorating a simple one.
+      e.g. for a luxury brief: "Lay large-format polished marble flooring with
+      soft reflections, clad the walls in full-height walnut veneer panelling
+      with slim brass reveals, replace the grid ceiling with a stepped gypsum
+      ceiling with recessed cove lighting and linear LED profiles, and remove
+      the wall-mounted notices".
     - Include WINDOW TREATMENTS where the windows are bare or the existing
       curtains are dated — well-made drapes or sheers in keeping with the
       direction. A bare window is one of the strongest "unfinished room" signals.
