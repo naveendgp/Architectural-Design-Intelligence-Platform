@@ -295,10 +295,13 @@ export function StudioChat({
   /* "Make it modern" often carries an unspoken "and get rid of the old stuff" —
      but their sofa might be staying, so ask rather than assume. Answering merges
      the two instructions into ONE edit, so it still costs a single image call. */
-  const askAboutClearing = (plan: Plan, styleInstruction: string) => {
-    const clear = plan.clearInstruction;
-    if (!clear) {
-      restyleThenFurnish(nextId(), plan, styleInstruction);
+  const askAboutClearing = (
+    request: string,
+    styleInstruction: string,
+    clearInstruction: string | null,
+  ) => {
+    if (!clearInstruction) {
+      restyleThenFurnish(request, styleInstruction);
       return;
     }
     const id = nextId();
@@ -307,7 +310,9 @@ export function StudioChat({
       {
         id,
         role: "ai",
-        text: `One thing before I start — ${clear.replace(/^remove /i, "should I also clear out ").replace(/\.$/, "")}? I can do it in the same pass.`,
+        text: `One thing before I start — ${clearInstruction
+          .replace(/^remove /i, "should I also clear out ")
+          .replace(/\.$/, "")}? Clearing it frees up floor, so I'll have more room to work with when I choose the furniture.`,
         actions: [
           {
             label: "Yes, clear them out",
@@ -316,16 +321,18 @@ export function StudioChat({
               setMessages((mm) =>
                 mm.map((x) => (x.id === id ? { ...x, chose: "Clearing them out", actions: undefined } : x)),
               );
-              restyleThenFurnish(id, plan, `${styleInstruction.replace(/\.$/, "")}, and ${clear}`);
+              restyleThenFurnish(request, `${styleInstruction.replace(/\.$/, "")}, and ${clearInstruction}`);
             },
           },
           {
             label: "No, keep them",
             run: () => {
               setMessages((mm) =>
-                mm.map((x) => (x.id === id ? { ...x, chose: "Keeping the existing furniture", actions: undefined } : x)),
+                mm.map((x) =>
+                  x.id === id ? { ...x, chose: "Keeping the existing furniture", actions: undefined } : x,
+                ),
               );
-              restyleThenFurnish(id, plan, styleInstruction);
+              restyleThenFurnish(request, styleInstruction);
             },
           },
         ],
@@ -333,16 +340,15 @@ export function StudioChat({
     ]);
   };
 
-  /* Room first, furniture second. After the repaint the photo is new, so the
-     studio re-runs its room analysis — wait for that before placing, otherwise
-     the layout is packed against the floor of a room that no longer exists. */
-  const restyleThenFurnish = async (msgId: number, plan: Plan, instruction: string) => {
-    const ok = await runRoomEdit(msgId, instruction);
+  /* Finish the room, wait for it to be re-measured, THEN choose furniture for it.
+     The furniture is deliberately not decided until this point: clearing out a
+     dated armchair and cabinet frees real floor, and a walnut-panelled corridor
+     calls for different pieces than a pale minimal one. */
+  const restyleThenFurnish = async (request: string, instruction: string) => {
+    const editId = nextId();
+    const ok = await runRoomEdit(editId, instruction);
     if (!ok) return;
 
-    /* Wait for the room to actually be re-measured. A fixed delay was not enough:
-       placement then ran with no floor calibration and no known obstacles, and
-       dropped a sofa straight on top of the wheelchair. */
     setBusy(true);
     setBusyLabel("Re-reading the new room…");
     setTyping(true);
@@ -356,38 +362,10 @@ export function StudioChat({
     setBusy(false);
     setBusyLabel(undefined);
 
-    const nextMsgId = nextId();
-    setMessages((m) => [
-      ...m,
-      {
-        id: nextMsgId,
-        role: "ai",
-        text: "Room's done. Ready to place the furniture into it?",
-        plan,
-        actions: [
-          {
-            label: "Add the furniture",
-            primary: true,
-            run: () => {
-              setMessages((mm) =>
-                mm.map((x) => (x.id === nextMsgId ? { ...x, chose: "Placing", actions: undefined } : x)),
-              );
-              applyPlan(nextMsgId, plan);
-            },
-          },
-          {
-            label: "Not now",
-            run: () =>
-              setMessages((mm) =>
-                mm.map((x) => (x.id === nextMsgId ? { ...x, chose: "Left the room empty", actions: undefined } : x)),
-              ),
-          },
-        ],
-      },
-    ]);
+    await planFurniture(request);
   };
 
-  /** Place a single named piece, or ask Gemini to design the whole space. */
+  /** Place a single named piece, or design the whole space. */
   const runDesign = async (raw: string) => {
     const t = raw.toLowerCase();
 
@@ -397,7 +375,6 @@ export function StudioChat({
       setTyping(true);
       const res = await onAdd(direct.id);
       setTyping(false);
-      // Don't claim success when the room actually refused the piece.
       if (res && res.ok === false) {
         setMessages((m) => [
           ...m,
@@ -421,29 +398,48 @@ export function StudioChat({
       return;
     }
 
-    // Everything else is a design request: let Gemini read the room and the
-    // catalog and propose a set of pieces.
     if (!capture || !onApplyPlan) {
       reply({ text: "I can design this room once it's fully loaded — give it a moment and try again." });
       return;
     }
+    await planRoom(raw);
+  };
 
+  const designError = (e: unknown, fallback: string) => {
+    const err = e as { code?: string };
+    setTyping(false);
+    setMessages((m) => [
+      ...m,
+      {
+        id: nextId(),
+        role: "ai",
+        text:
+          err.code === "quota"
+            ? "I've hit the Gemini rate limit. Wait a moment and ask again."
+            : err.code === "empty"
+              ? "Your marketplace is empty. Upload a 3D model in Settings → Upload 3D Model and I'll design with it."
+              : fallback,
+      },
+    ]);
+  };
+
+  /** Step 1 — how the room itself should be finished. No furniture chosen yet. */
+  const planRoom = async (request: string) => {
+    if (!capture) return;
     setBusy(true);
-    setBusyLabel("Designing your room… (~5–10s)");
+    setBusyLabel("Looking at the room… (~5–10s)");
     setTyping(true);
     try {
-      // Hard ceiling on the whole round-trip so a stalled capture or a slow model
-      // can never leave the panel spinning.
       const plan = await Promise.race([
         (async () => {
           const shot = await capture();
-          return api.design({ image: shot, request: raw, placed: placed ?? [], capacity });
+          return api.design({ image: shot, request, placed: placed ?? [], capacity, stage: "room" });
         })(),
         new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout")), 45000)),
       ]);
       setTyping(false);
 
-      if (plan.offTopic || plan.items.length === 0) {
+      if (plan.offTopic) {
         setMessages((m) => [
           ...m,
           {
@@ -451,17 +447,82 @@ export function StudioChat({
             role: "ai",
             text:
               plan.reply ||
-              `Tell me what you'd like this space to become — e.g. “turn this into a modern office waiting area” — and I'll pick the pieces from your marketplace.`,
+              `Tell me what you'd like this space to become — e.g. “turn this into a modern office waiting area” — and I'll design it from your marketplace.`,
           },
         ]);
         return;
       }
 
+      const options = plan.surfaceOptions ?? [];
+      const canEdit = !!(projectId && photoUrl && onRoomEdited && options.length);
+      if (!canEdit) {
+        await planFurniture(request); // nothing worth changing — go straight to furnishing
+        return;
+      }
+
+      const msgId = nextId();
+      setMessages((m) => [
+        ...m,
+        {
+          id: msgId,
+          role: "ai",
+          text: `${plan.reply}\n\nLet's finish the room first — I'll choose the furniture afterwards, once I can see how much space it leaves. Which direction do you want?\n\n${options
+            .map((o) => `· ${o.label} — ${o.reason || o.instruction}`)
+            .join("\n")}`,
+          actions: [
+            ...options.map((o, i) => ({
+              label: o.label,
+              primary: i === 0,
+              run: () => {
+                setMessages((mm) =>
+                  mm.map((x) => (x.id === msgId ? { ...x, chose: o.label, actions: undefined } : x)),
+                );
+                askAboutClearing(request, o.instruction, plan.clearInstruction ?? null);
+              },
+            })),
+            {
+              label: "Keep the room as it is",
+              run: () => {
+                setMessages((mm) =>
+                  mm.map((x) =>
+                    x.id === msgId ? { ...x, chose: "Keeping the room as it is", actions: undefined } : x,
+                  ),
+                );
+                planFurniture(request);
+              },
+            },
+          ],
+        },
+      ]);
+    } catch (e) {
+      designError(e, "I couldn't put a design together just now — the AI service may be busy. Please try again.");
+    } finally {
+      setBusy(false);
+      setBusyLabel(undefined);
+    }
+  };
+
+  /** Step 2 — furniture, judged against the room as it now stands. */
+  const planFurniture = async (request: string) => {
+    if (!capture || !onApplyPlan) return;
+    setBusy(true);
+    setBusyLabel("Choosing furniture for the finished room…");
+    setTyping(true);
+    try {
+      const plan = await Promise.race([
+        (async () => {
+          const shot = await capture();
+          return api.design({ image: shot, request, placed: placed ?? [], capacity, stage: "furniture" });
+        })(),
+        new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout")), 45000)),
+      ]);
+      setTyping(false);
+
       // Pack the proposal for real before showing it, so the card never promises
       // pieces the room can't take.
       let items = plan.items;
-      let droppedForSpace: string[] = [];
-      if (onFitPlan) {
+      const droppedForSpace: string[] = [];
+      if (onFitPlan && items.length) {
         const fitted = onFitPlan(items.map((l) => ({ productId: l.product.id, qty: l.qty })));
         const qtyById = new Map(fitted.map((f) => [f.productId, f.qty]));
         const next: PlanLine[] = [];
@@ -483,86 +544,31 @@ export function StudioChat({
           {
             id: nextId(),
             role: "ai",
-            text: "This room doesn't have clear floor space left for anything more. Remove a piece or two and ask me again, and I'll design around what's left.",
+            text: "This room doesn't have clear floor space left for anything more. Remove a piece or two and ask me again.",
           },
         ]);
         return;
       }
 
       const totalInr = items.reduce((n, l) => n + l.subtotalInr, 0);
-      const options = plan.surfaceOptions ?? [];
-      const canEdit = !!(projectId && photoUrl && onRoomEdited && options.length);
-      const msgId = nextId();
-      const planData: Plan = {
-        intent: plan.intent,
-        budgetInr: plan.budgetInr,
-        totalInr,
-        trimmed: plan.trimmed,
-        droppedForSpace,
-        items,
-        surfaceOptions: plan.surfaceOptions,
-        clearInstruction: plan.clearInstruction,
-      };
-
-      /* Order matters: finish the room, THEN furnish it. Placing first meant the
-         layout was computed against the old room and the user watched furniture
-         appear before the walls and floor caught up. */
-      setMessages((m) => [
-        ...m,
-        {
-          id: msgId,
-          role: "ai",
-          text: canEdit
-            ? `${plan.reply}\n\nI'd finish the room first, then place these pieces into it. Which direction do you want?\n\n${options
-                .map((o) => `· ${o.label} — ${o.reason || o.instruction}`)
-                .join("\n")}`
-            : plan.reply,
-          plan: planData,
-          /* A style choice, not a yes/no: each button is a different direction on
-             the brief, so the user steers the look without having to describe it. */
-          actions: canEdit
-            ? [
-                ...options.map((o, i) => ({
-                  label: o.label,
-                  primary: i === 0,
-                  run: () => {
-                    setMessages((mm) =>
-                      mm.map((x) => (x.id === msgId ? { ...x, chose: o.label, actions: undefined } : x)),
-                    );
-                    askAboutClearing(planData, o.instruction);
-                  },
-                })),
-                {
-                  label: "Keep the room as it is",
-                  run: () => {
-                    setMessages((mm) =>
-                      mm.map((x) =>
-                        x.id === msgId ? { ...x, chose: "Keeping the room as it is", actions: undefined } : x,
-                      ),
-                    );
-                    applyPlan(msgId, planData);
-                  },
-                },
-              ]
-            : undefined,
-        },
-      ]);
-    } catch (e) {
-      setTyping(false);
-      const err = e as { code?: string };
       setMessages((m) => [
         ...m,
         {
           id: nextId(),
           role: "ai",
-          text:
-            err.code === "quota"
-              ? "I've hit the Gemini rate limit. Wait a moment and ask again."
-              : err.code === "empty"
-                ? "Your marketplace is empty. Upload a 3D model in Settings → Upload 3D Model and I'll design with it."
-                : "I couldn't put a design together just now — the AI service may be busy. Please try again.",
+          text: plan.reply,
+          plan: {
+            intent: plan.intent,
+            budgetInr: plan.budgetInr,
+            totalInr,
+            trimmed: plan.trimmed,
+            droppedForSpace,
+            items,
+          },
         },
       ]);
+    } catch (e) {
+      designError(e, "I couldn't choose the furniture just now — the AI service may be busy. Please try again.");
     } finally {
       setBusy(false);
       setBusyLabel(undefined);

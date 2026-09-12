@@ -244,6 +244,12 @@ export async function designPlan(
   catalog: CatalogEntry[],
   placed: { name: string; qty: number }[],
   capacity?: { floorAreaM2: number; freeFloorM2: number },
+  /* Which half of the job to do. Furnishing is decided AFTER the room is
+     finished, because finishing changes the brief: clearing a dated armchair and
+     cabinet frees real floor, and a walnut-panelled corridor wants different
+     pieces than a pale minimal one. Choosing both at once judged the furniture
+     against a room that was about to stop existing. */
+  stage: "room" | "furniture" = "furniture",
 ): Promise<DesignPlan> {
   const catalogList = catalog
     .map((p) => {
@@ -299,6 +305,17 @@ THE CATALOG — you may ONLY choose from these, using the exact id string:
 ${catalogList}
 
 THE REQUEST: "${request}"
+
+${stage === "room"
+  ? `THIS STEP IS THE ROOM ITSELF — its surfaces and what is cleared out. Do NOT
+choose any furniture yet: return an EMPTY items array. Furniture is chosen in a
+second pass, once the room is finished, so it can be judged against the space
+that actually results.`
+  : `THE ROOM IS ALREADY FINISHED — the photo shows its final surfaces, and
+anything that was to be cleared out is already gone. Choose the FURNITURE only.
+Do NOT propose any surface change: return no surfaceOptions and no
+clearInstruction. The measured space below reflects the finished room, so use
+all of it.`}
 
 Your job: understand what the user actually WANTS, then choose the pieces from
 the catalog that deliver it. The request is often a goal, not a shopping list —

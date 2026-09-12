@@ -100,6 +100,8 @@ export const api = {
     request: string;
     placed: { name: string; qty: number }[];
     capacity?: { floorAreaM2: number; freeFloorM2: number };
+    /** "room" decides surfaces only; "furniture" designs into the finished room. */
+    stage?: "room" | "furniture";
   }) => {
     const res = await fetch("/api/ai/design", {
       method: "POST",
