@@ -318,9 +318,19 @@ RULES:
   existing flooring and walls in the photo. If they genuinely fight the style
   being asked for (dated tiles under a "modern" brief, a colour that clashes),
   propose a restyle in "surfaces":
-    - instruction: ONE plain-English sentence covering both changes you want,
-      e.g. "Change the flooring to warm oak planks and the walls to soft
-      off-white". Mention only what should actually change.
+    - instruction: name EVERY change the room needs to actually reach the look,
+      as one explicit list. Repainting a wall alone rarely transforms a dated
+      room — look at the photo and say what is holding it back. Cover, where
+      they apply: wall colour/finish, flooring, and the REMOVAL of specific
+      dated or cluttering things you can see (e.g. "remove the framed photo
+      collage from the wall", "remove the old TV cabinet", "remove the gold
+      ceiling trim"). Name each item literally and specifically, because a
+      strict photo editor executes exactly this list and nothing else.
+      e.g. "Change the walls to soft off-white, change the flooring to warm oak
+      planks, remove the framed photo collage from the wall, and remove the
+      patterned ceiling trim".
+    - Do NOT ask to remove or alter anything the user might want kept, such as
+      windows, doors, or built-in structure.
     - reason: a short phrase on why it helps.
   ONLY propose this when the request is about the room's overall look or purpose
   ("make it modern", "turn this into a waiting area"). If the user asked for a
@@ -644,12 +654,13 @@ export async function editRoomImage(
   instruction: string,
 ): Promise<RenderedImage> {
   const prompt = `You are a precise interior photo editor. This is a real photo of a
-room. Apply EXACTLY ONE change to it: "${instruction}". Nothing more.
+room. Apply EXACTLY the following change(s) to it, and nothing else: "${instruction}".
 
 STRICT RULES — do not hallucinate:
-- Do ONLY what the instruction literally says. Do NOT add, invent, or introduce any new
-  object, furniture, decor, plant, rug, lamp, artwork, or texture that the instruction
-  did not explicitly ask for.
+- Do ONLY what the instruction literally says. Where it lists several changes, make
+  every one of them — but still nothing beyond them. Do NOT add, invent, or introduce
+  any new object, furniture, decor, plant, rug, lamp, artwork, or texture that the
+  instruction did not explicitly ask for.
 - If the instruction is to REMOVE something (e.g. curtains), delete it and fill the space
   with what would realistically be behind it (the plain wall, window, or floor) — do NOT
   put a different object in its place.
