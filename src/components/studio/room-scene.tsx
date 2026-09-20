@@ -21,12 +21,42 @@ import {
    measurement overlay can share it. Each piece's base is pinned to its anchor on
    the photo, so furniture is always seated where you drop it. */
 
-function FovRig({ fov }: { fov: number }) {
+/* Points the render camera at the same camera the placement maths assumes.
+
+   A plain three.js camera puts its optical centre — and therefore the horizon —
+   at the middle of the frame. Most room photos are taken with a slight downward
+   tilt, so their eye level sits higher (0.34 in a real living room), and a flat
+   floor then CANNOT project onto the anchors: every piece rendered (0.5 −
+   horizon) of a frame too low, seated far down the photo while still sized for
+   the distance its anchor implied. That mismatch is what made a 3-seater read
+   smaller than the armchair beside it, and dropped pendants to head height.
+
+   `setViewOffset` renders our canvas as a window onto a larger virtual frame
+   whose centre lands on the horizon — an off-axis frustum, the same trick a
+   tilt-shift lens uses. It keeps verticals vertical (so the photo still lines
+   up) while moving the optical centre to eye level, which is exactly the camera
+   `anchorToPoint` projects with: half-height tan(fov/2), half-width scaled by
+   aspect, horizon at `horizonY`. */
+function CameraRig({ fov, horizonY }: { fov: number; horizonY: number }) {
   const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
+  const size = useThree((s) => s.size);
   useEffect(() => {
-    camera.fov = fov;
+    const { width: W, height: H } = size;
+    if (!W || !H) return;
+    const tanV = Math.tan((fov * Math.PI) / 360);
+    // Grow the virtual frame just enough that the horizon is its centre and our
+    // canvas still fits inside it.
+    const fullH = 2 * Math.max(horizonY, 1 - horizonY) * H;
+    const fullW = (W * fullH) / H;
+    camera.fov = (2 * Math.atan((tanV * fullH) / H) * 180) / Math.PI;
+    camera.aspect = W / H;
+    camera.setViewOffset(fullW, fullH, (fullW - W) / 2, fullH / 2 - horizonY * H, W, H);
     camera.updateProjectionMatrix();
-  }, [fov, camera]);
+    return () => {
+      camera.clearViewOffset();
+      camera.updateProjectionMatrix();
+    };
+  }, [fov, horizonY, size, camera]);
   return null;
 }
 
@@ -479,7 +509,7 @@ function SceneContent({
 
   return (
     <>
-      <FovRig fov={calib.fov} />
+      <CameraRig fov={calib.fov} horizonY={calib.horizonY} />
       <PointerLayer
         registry={registry}
         getCollidingIds={() => collidingIdsRef.current}
