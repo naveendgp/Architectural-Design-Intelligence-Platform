@@ -261,7 +261,7 @@ function Studio() {
        horizon) carry only the old near/far depths, which no longer mean
        anything. Replaying one would leave the scene on default calibration and
        keep furniture mis-scaled, so bumping the prefix retires them. */
-    const cacheKey = `roomAnalysis3:${projectId}:${url}`;
+    const cacheKey = `roomAnalysis4:${projectId}:${url}`;
     const applyAnalysis = (a: {
       objects: FloorObjectBox[];
       floorTop: number[];

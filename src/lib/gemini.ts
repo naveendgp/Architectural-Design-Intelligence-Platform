@@ -603,19 +603,33 @@ export async function analyzeRoom(image: Buffer, mimeType: string): Promise<Room
    the walls (the wall–ceiling line), sampled at the same 7 x positions. Everything
    ABOVE ceilingBottom[i] is ceiling. If no ceiling is visible, use small values (~0.05).
 
-4. WHERE THE CAMERA WAS, which sets the scale everything is drawn at. Judge it from
-   the architecture you can see — door leaves are ~2.0m tall, door handles ~1.0m,
-   light switches ~1.2m, ceiling tiles ~0.6m, a stair riser ~0.17m:
-   - horizonY (0..1): the y of EYE LEVEL — the horizon line the perspective
-     converges on. Find where the receding lines (floor/ceiling edges, the tops and
-     bottoms of doors) would meet: that vanishing point is on this line. Anything
-     in the photo ABOVE it is being looked up at, anything BELOW it looked down on.
-     A phone held level gives ~0.5; tilted down to show more floor gives 0.35-0.45.
-     This is the single most important number — getting it wrong bends the whole room.
-   - cameraHeightM: how high the lens was above the FLOOR. A standing person with a
-     phone is 1.4-1.6m; a seated or low shot 0.9-1.2m; a tripod ~1.2m. Cross-check
-     it: at eye level the horizon crosses the far wall exactly cameraHeightM above
-     that wall's floor — compare that against a door in the shot.
+4. rulers: 2 to 4 REAL THINGS ALREADY IN THIS PHOTO whose true height you are
+   confident about, measured in the image. These set the size every piece of
+   virtual furniture is drawn at, so new furniture looks right standing next to
+   what is already there. For each one give:
+   - label: what it is.
+   - realHeightM: its true height in metres. Only pick things with a standard
+     size you are sure of — an interior door leaf 2.0m (2.1m if it looks tall),
+     a door handle at 1.0m off the floor, a light switch at 1.2m, a dining chair
+     0.9m, an armchair back 0.85m, a sofa back 0.8m, a kitchen counter 0.9m, a
+     stair riser 0.17m, a standard brick course 0.075m.
+   - ayTop / ayBottom: the normalized y (0 = top of image, 1 = bottom) of the very
+     TOP and the very BOTTOM of that object as it appears in THIS photo. Be
+     precise — these two numbers are a measurement, not an estimate.
+   - standsOnFloor: true only if its BOTTOM rests on the floor (a door, a sofa, a
+     cabinet). False for something mounted up a wall (a switch, a picture).
+
+   CHOOSE RULERS AT DIFFERENT DISTANCES — one close to the camera and one far
+   away. Two objects the same distance away tell us nothing about perspective.
+   Prefer doors: they are everywhere, they always reach the floor, and their
+   height barely varies.
+
+5. WHERE THE CAMERA WAS — your own estimate, used only if the rulers don't work out:
+   - horizonY (0..1): the y of EYE LEVEL, where receding lines (floor and ceiling
+     edges, the tops and bottoms of doors) converge. A phone held level gives
+     ~0.5; tilted down to show more floor gives 0.35-0.45.
+   - cameraHeightM: how high the lens was above the FLOOR. A standing person with
+     a phone is 1.4-1.6m; a seated or low shot 0.9-1.2m; a tripod ~1.2m.
    - ceilingHeightM: floor-to-ceiling height. Homes are 2.4-3.0m; offices, lobbies
      and corridors with a false ceiling 2.6-3.5m. If no ceiling is visible, say 2.7.`;
 
@@ -639,6 +653,20 @@ export async function analyzeRoom(image: Buffer, mimeType: string): Promise<Room
       },
       floorTop: line7,
       ceilingBottom: line7,
+      rulers: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            label: { type: "string" },
+            realHeightM: { type: "number" },
+            ayTop: { type: "number" },
+            ayBottom: { type: "number" },
+            standsOnFloor: { type: "boolean" },
+          },
+          required: ["label", "realHeightM", "ayTop", "ayBottom", "standsOnFloor"],
+        },
+      },
       cameraHeightM: { type: "number" },
       horizonY: { type: "number" },
       ceilingHeightM: { type: "number" },
@@ -647,6 +675,7 @@ export async function analyzeRoom(image: Buffer, mimeType: string): Promise<Room
       "objects",
       "floorTop",
       "ceilingBottom",
+      "rulers",
       "cameraHeightM",
       "horizonY",
       "ceilingHeightM",
@@ -673,7 +702,7 @@ export async function analyzeRoom(image: Buffer, mimeType: string): Promise<Room
   /* The camera sets the scale everything is drawn at, so hold each number inside
      what is physically possible. A camera can't be held below a coffee table or
      above the ceiling, and the horizon can't sit off the photo. */
-  const camH = Math.min(2.2, Math.max(0.6, Number(parsed.cameraHeightM) || 1.5));
+  const camH = Math.min(1.9, Math.max(0.9, Number(parsed.cameraHeightM) || 1.5));
   const ceilH = Math.min(
     6,
     Math.max(camH + 0.4, Number(parsed.ceilingHeightM) || 2.7),
@@ -686,12 +715,51 @@ export async function analyzeRoom(image: Buffer, mimeType: string): Promise<Room
      cross it. Left unchecked, a horizon reported below the floor line sends depth
      to infinity right where furniture sits and renders it microscopic. */
   let horizon = Math.min(0.85, Math.max(0.15, Number(parsed.horizonY) || 0.5));
+  const camera = camH;
+
+  /* Fit the camera to the RULERS — things already in the photo whose real height
+     we know. For any upright object of height L standing on the floor, its base
+     sits at   ayBottom = horizonY + cameraHeight · (pixel height / L)
+     because both its apparent size and its distance below eye level shrink with
+     distance at the same rate. The field of view cancels out of that entirely,
+     which is why this beats asking for the camera directly: it is measured off
+     the photo instead of guessed, and it is exactly the comparison a person
+     makes when they look at new furniture beside the real sofa. Two rulers at
+     different distances fix both numbers; more than two are least-squares fitted. */
+  type Ruler = { k: number; ay: number };
+  const rulers: Ruler[] = [];
+  for (const r of Array.isArray(parsed.rulers) ? (parsed.rulers as unknown[]) : []) {
+    const o = r as Record<string, unknown>;
+    if (o.standsOnFloor === false) continue; // base isn't on the floor — no anchor
+    const L = Number(o.realHeightM);
+    const top = Number(o.ayTop);
+    const bottom = Number(o.ayBottom);
+    if (![L, top, bottom].every(Number.isFinite)) continue;
+    if (L < 0.1 || L > 3.5 || bottom <= top) continue;
+    const pxH = bottom - top;
+    if (pxH < 0.02) continue; // too small on screen to measure reliably
+    rulers.push({ k: pxH / L, ay: clamp01(bottom) });
+  }
+  /* Solve for the HORIZON only, holding camera height at the estimate. Fitting
+     both at once is unstable: rulers in one room tend to sit at similar
+     distances, so the line through them is short and noise swings its slope —
+     on a real living room it produced a camera held 0.77m off the floor. Camera
+     height has a tight physical prior (a person and a phone) while eye level
+     has none, so the measurement is spent on the unknown that needs it. The
+     median resists one badly-judged ruler. */
+  if (rulers.length) {
+    const guesses = rulers.map((r) => r.ay - camera * r.k).sort((a, b) => a - b);
+    const mid = Math.floor(guesses.length / 2);
+    const fitted =
+      guesses.length % 2 ? guesses[mid] : (guesses[mid - 1] + guesses[mid]) / 2;
+    if (Number.isFinite(fitted)) horizon = Math.min(0.85, Math.max(0.02, fitted));
+  }
   /* Depth goes as 1/(distance from the horizon), so a horizon that creeps right up
      to the floor line puts the back of the room kilometres away and shrinks
      furniture to nothing. Keep it at least as far off as the deepest space we are
      willing to believe in (25m — a long lift lobby). 1.04 = 2·tan(55°/2), the
      default vertical field of view. */
-  const minGap = camH / (25 * 1.04);
+  const minGap = camera / (25 * 1.04);
   const floorLimit = Math.min(...floorTop) - minGap;
   const ceilLimit = Math.max(...ceilingBottom) + minGap;
   if (ceilLimit < floorLimit) {
@@ -702,9 +770,10 @@ export async function analyzeRoom(image: Buffer, mimeType: string): Promise<Room
     objects,
     floorTop,
     ceilingBottom,
-    cameraHeightM: camH,
+    cameraHeightM: camera,
     horizonY: horizon,
-    ceilingHeightM: ceilH,
+    // Re-checked against the fitted camera: the lens is always under the ceiling.
+    ceilingHeightM: Math.max(camera + 0.4, ceilH),
   };
 }
 
