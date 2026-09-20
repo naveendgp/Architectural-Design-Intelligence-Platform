@@ -88,21 +88,21 @@ export function MeasureOverlay({
     const maxAy = Math.max(...footprint.map(f => f.ay));
 
     const leftEdgeCenterAy = a.ay;
-    const pLeftScreen = anchorToPoint(0, leftEdgeCenterAy, aspect, calib, depth ? depth.sample(0, leftEdgeCenterAy) : leftEdgeCenterAy);
-    const pLeftEdge = anchorToPoint(minAx, leftEdgeCenterAy, aspect, calib, depth ? depth.sample(minAx, leftEdgeCenterAy) : leftEdgeCenterAy);
+    const pLeftScreen = anchorToPoint(0, leftEdgeCenterAy, aspect, calib, "floor");
+    const pLeftEdge = anchorToPoint(minAx, leftEdgeCenterAy, aspect, calib, "floor");
     wallLines.push({ id: "left", x1: minAx, y1: leftEdgeCenterAy, x2: 0, y2: leftEdgeCenterAy, dist: pLeftEdge.distanceTo(pLeftScreen) });
 
-    const pRightScreen = anchorToPoint(1, leftEdgeCenterAy, aspect, calib, depth ? depth.sample(1, leftEdgeCenterAy) : leftEdgeCenterAy);
-    const pRightEdge = anchorToPoint(maxAx, leftEdgeCenterAy, aspect, calib, depth ? depth.sample(maxAx, leftEdgeCenterAy) : leftEdgeCenterAy);
+    const pRightScreen = anchorToPoint(1, leftEdgeCenterAy, aspect, calib, "floor");
+    const pRightEdge = anchorToPoint(maxAx, leftEdgeCenterAy, aspect, calib, "floor");
     wallLines.push({ id: "right", x1: maxAx, y1: leftEdgeCenterAy, x2: 1, y2: leftEdgeCenterAy, dist: pRightEdge.distanceTo(pRightScreen) });
 
     const backEdgeCenterAx = a.ax;
-    const pBackScreen = anchorToPoint(backEdgeCenterAx, 0.45, aspect, calib, depth ? depth.sample(backEdgeCenterAx, 0.45) : 0.45);
-    const pBackEdge = anchorToPoint(backEdgeCenterAx, minAy, aspect, calib, depth ? depth.sample(backEdgeCenterAx, minAy) : minAy);
+    const pBackScreen = anchorToPoint(backEdgeCenterAx, 0.45, aspect, calib, "floor");
+    const pBackEdge = anchorToPoint(backEdgeCenterAx, minAy, aspect, calib, "floor");
     wallLines.push({ id: "back", x1: backEdgeCenterAx, y1: minAy, x2: backEdgeCenterAx, y2: 0.45, dist: pBackEdge.distanceTo(pBackScreen) });
 
-    const pFrontScreen = anchorToPoint(backEdgeCenterAx, 1, aspect, calib, depth ? depth.sample(backEdgeCenterAx, 1) : 1);
-    const pFrontEdge = anchorToPoint(backEdgeCenterAx, maxAy, aspect, calib, depth ? depth.sample(backEdgeCenterAx, maxAy) : maxAy);
+    const pFrontScreen = anchorToPoint(backEdgeCenterAx, 1, aspect, calib, "floor");
+    const pFrontEdge = anchorToPoint(backEdgeCenterAx, maxAy, aspect, calib, "floor");
     wallLines.push({ id: "front", x1: backEdgeCenterAx, y1: maxAy, x2: backEdgeCenterAx, y2: 1, dist: pFrontEdge.distanceTo(pFrontScreen) });
   }
 

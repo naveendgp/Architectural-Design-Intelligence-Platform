@@ -568,10 +568,12 @@ export type RoomAnalysis = {
   objects: FloorObject[];
   floorTop: number[];
   ceilingBottom: number[];
-  /** Real distance (m) to the floor at the bottom edge of the photo. */
-  nearDepthM: number;
-  /** Real distance (m) to the farthest visible floor — the far wall or corridor end. */
-  farDepthM: number;
+  /** How high the camera was held above the floor (m) — sets the whole scale. */
+  cameraHeightM: number;
+  /** Normalized y of eye level (the horizon / vanishing line) in the photo. */
+  horizonY: number;
+  /** Floor-to-ceiling height of the room (m). */
+  ceilingHeightM: number;
 };
 
 /**
@@ -601,15 +603,21 @@ export async function analyzeRoom(image: Buffer, mimeType: string): Promise<Room
    the walls (the wall–ceiling line), sampled at the same 7 x positions. Everything
    ABOVE ceilingBottom[i] is ceiling. If no ceiling is visible, use small values (~0.05).
 
-4. HOW DEEP THE SPACE IS, in real metres — this sets the scale everything is drawn
-   at, so judge it from the architecture you can see (door heights ~2.0m, ceiling
-   tiles ~0.6m, floor tiles, a standard step):
-   - nearDepthM: distance from the camera to the floor at the very BOTTOM edge of
-     the photo. Typically 1-3m.
-   - farDepthM: distance from the camera to the FARTHEST visible floor — the far
-     wall, or the end of a corridor. A small room may be 4-6m; a long corridor or
-     lift lobby can be 10-15m. Do not default to a mid value: a deep space
-     reported as shallow makes furniture render far too large.`;
+4. WHERE THE CAMERA WAS, which sets the scale everything is drawn at. Judge it from
+   the architecture you can see — door leaves are ~2.0m tall, door handles ~1.0m,
+   light switches ~1.2m, ceiling tiles ~0.6m, a stair riser ~0.17m:
+   - horizonY (0..1): the y of EYE LEVEL — the horizon line the perspective
+     converges on. Find where the receding lines (floor/ceiling edges, the tops and
+     bottoms of doors) would meet: that vanishing point is on this line. Anything
+     in the photo ABOVE it is being looked up at, anything BELOW it looked down on.
+     A phone held level gives ~0.5; tilted down to show more floor gives 0.35-0.45.
+     This is the single most important number — getting it wrong bends the whole room.
+   - cameraHeightM: how high the lens was above the FLOOR. A standing person with a
+     phone is 1.4-1.6m; a seated or low shot 0.9-1.2m; a tripod ~1.2m. Cross-check
+     it: at eye level the horizon crosses the far wall exactly cameraHeightM above
+     that wall's floor — compare that against a door in the shot.
+   - ceilingHeightM: floor-to-ceiling height. Homes are 2.4-3.0m; offices, lobbies
+     and corridors with a false ceiling 2.6-3.5m. If no ceiling is visible, say 2.7.`;
 
   const line7 = { type: "array", items: { type: "number" } };
   const parsed = await generateJson(image, mimeType, prompt, {
@@ -631,10 +639,18 @@ export async function analyzeRoom(image: Buffer, mimeType: string): Promise<Room
       },
       floorTop: line7,
       ceilingBottom: line7,
-      nearDepthM: { type: "number" },
-      farDepthM: { type: "number" },
+      cameraHeightM: { type: "number" },
+      horizonY: { type: "number" },
+      ceilingHeightM: { type: "number" },
     },
-    required: ["objects", "floorTop", "ceilingBottom", "nearDepthM", "farDepthM"],
+    required: [
+      "objects",
+      "floorTop",
+      "ceilingBottom",
+      "cameraHeightM",
+      "horizonY",
+      "ceilingHeightM",
+    ],
   });
 
   const raw = Array.isArray(parsed.objects) ? (parsed.objects as unknown[]) : [];
@@ -654,17 +670,41 @@ export async function analyzeRoom(image: Buffer, mimeType: string): Promise<Room
     const clean = arr.filter((n) => Number.isFinite(n));
     return clean.length >= 2 ? clean : [fallback, fallback];
   };
-  /* Depth sets the scale everything is drawn at, so keep the estimate inside
-     plausible architecture and make sure far is meaningfully beyond near. */
-  const near = Math.min(4, Math.max(0.8, Number(parsed.nearDepthM) || 1.7));
-  const far = Math.min(20, Math.max(near + 1.5, Number(parsed.farDepthM) || 6.5));
+  /* The camera sets the scale everything is drawn at, so hold each number inside
+     what is physically possible. A camera can't be held below a coffee table or
+     above the ceiling, and the horizon can't sit off the photo. */
+  const camH = Math.min(2.2, Math.max(0.6, Number(parsed.cameraHeightM) || 1.5));
+  const ceilH = Math.min(
+    6,
+    Math.max(camH + 0.4, Number(parsed.ceilingHeightM) || 2.7),
+  );
+
+  const floorTop = clampLine(parsed.floorTop, 0.62);
+  const ceilingBottom = clampLine(parsed.ceilingBottom, 0.08);
+  /* The horizon must lie between the two lines we detected: visible floor recedes
+     UP toward eye level and the ceiling comes DOWN to it, so neither surface can
+     cross it. Left unchecked, a horizon reported below the floor line sends depth
+     to infinity right where furniture sits and renders it microscopic. */
+  let horizon = Math.min(0.85, Math.max(0.15, Number(parsed.horizonY) || 0.5));
+  /* Depth goes as 1/(distance from the horizon), so a horizon that creeps right up
+     to the floor line puts the back of the room kilometres away and shrinks
+     furniture to nothing. Keep it at least as far off as the deepest space we are
+     willing to believe in (25m — a long lift lobby). 1.04 = 2·tan(55°/2), the
+     default vertical field of view. */
+  const minGap = camH / (25 * 1.04);
+  const floorLimit = Math.min(...floorTop) - minGap;
+  const ceilLimit = Math.max(...ceilingBottom) + minGap;
+  if (ceilLimit < floorLimit) {
+    horizon = Math.min(floorLimit, Math.max(ceilLimit, horizon));
+  }
 
   return {
     objects,
-    floorTop: clampLine(parsed.floorTop, 0.62),
-    ceilingBottom: clampLine(parsed.ceilingBottom, 0.08),
-    nearDepthM: near,
-    farDepthM: far,
+    floorTop,
+    ceilingBottom,
+    cameraHeightM: camH,
+    horizonY: horizon,
+    ceilingHeightM: ceilH,
   };
 }
 

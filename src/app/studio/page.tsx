@@ -91,8 +91,9 @@ const WALL_PRESETS = [
 const clampAnchor = (v: number) => Math.min(0.94, Math.max(0.06, v));
 const DEFAULT_CALIB: Calibration = {
   fov: 55,
-  nearDepth: 1.7,
-  farDepth: 6.5,
+  cameraHeightM: 1.5,
+  horizonY: 0.5,
+  ceilingHeightM: 2.7,
   // Furniture at real metric size (100%) reads a touch large in these rooms; 90%
   // sits more convincingly. Users can still fine-tune via Calibrate → Furniture size.
   scale: 0.9,
@@ -256,32 +257,34 @@ function Studio() {
     // Keyed on the PHOTO, not just the project: a restyle produces a new photo,
     // and reusing the old analysis kept furniture the edit had already removed as
     // phantom floor obstacles — which reported a cleared room as 0m² free.
-    /* v2: entries cached before the analysis measured room depth carry no
-       nearDepthM/farDepthM, so replaying one would silently skip the depth
-       calibration and keep furniture mis-scaled. Bumping the prefix retires them. */
-    const cacheKey = `roomAnalysis2:${projectId}:${url}`;
+    /* v3: entries cached before the room was measured as a CAMERA (height +
+       horizon) carry only the old near/far depths, which no longer mean
+       anything. Replaying one would leave the scene on default calibration and
+       keep furniture mis-scaled, so bumping the prefix retires them. */
+    const cacheKey = `roomAnalysis3:${projectId}:${url}`;
     const applyAnalysis = (a: {
       objects: FloorObjectBox[];
       floorTop: number[];
       ceilingBottom: number[];
-      nearDepthM?: number;
-      farDepthM?: number;
+      cameraHeightM?: number;
+      horizonY?: number;
+      ceilingHeightM?: number;
     }) => {
-      /* Scale everything to the room's REAL depth. The near/far constants used to
-         be fixed at 1.7-6.5m, which suits a living room but not a lift lobby that
-         runs 10m+: a chair placed down the corridor was drawn as if it stood 3m
-         away when it really stood 8m, so it rendered about 2.5x too large. A hand
-         calibration always wins — we only fill in what the user hasn't set. */
-      if (
-        typeof a.nearDepthM === "number" &&
-        typeof a.farDepthM === "number" &&
-        a.farDepthM > a.nearDepthM
-      ) {
-        /* Depth is a MEASUREMENT of the room, so it always follows the analysis —
-           gating it on "has the user calibrated?" would strand every project that
-           had ever run auto-fit, since that writes the same saved calibration.
-           `scale` is taste and stays exactly as the user left it. */
-        applyCalib((c) => ({ ...c, nearDepth: a.nearDepthM!, farDepth: a.farDepthM! }));
+      /* Put the virtual camera where the real one stood. Depth used to be a
+         straight lerp down the photo, which implies a camera whose height
+         changes row by row — so furniture matched neither the room nor itself
+         and came out roughly twice too large low in the frame. */
+      if (typeof a.cameraHeightM === "number" && typeof a.horizonY === "number") {
+        /* The camera is a MEASUREMENT of the room, so it always follows the
+           analysis — gating it on "has the user calibrated?" would strand every
+           project that had ever run auto-fit, since that writes the same saved
+           calibration. `scale` is taste and stays exactly as the user left it. */
+        applyCalib((c) => ({
+          ...c,
+          cameraHeightM: a.cameraHeightM!,
+          horizonY: a.horizonY!,
+          ceilingHeightM: a.ceilingHeightM ?? c.ceilingHeightM,
+        }));
       }
       setSceneCalib({ floorTop: a.floorTop, ceilingBottom: a.ceilingBottom });
       setRealObjects(a.objects); // state change re-renders the scene with the new calib
@@ -1596,24 +1599,34 @@ function Studio() {
                 onChange={(v) => applyCalib((c) => ({ ...c, fov: v }))}
               />
               <SliderRow
-                label="Front distance"
-                icon={Maximize2}
-                value={Math.round(calib.nearDepth * 100)}
-                min={80}
-                max={400}
+                label="Camera height"
+                icon={Camera}
+                value={Math.round(calib.cameraHeightM * 100)}
+                min={60}
+                max={220}
                 step={5}
                 suffix="cm"
-                onChange={(v) => applyCalib((c) => ({ ...c, nearDepth: v / 100 }))}
+                onChange={(v) => applyCalib((c) => ({ ...c, cameraHeightM: v / 100 }))}
               />
               <SliderRow
-                label="Back distance"
+                label="Eye level"
                 icon={Maximize2}
-                value={Math.round(calib.farDepth * 100)}
-                min={300}
-                max={1200}
-                step={10}
+                value={Math.round(calib.horizonY * 100)}
+                min={15}
+                max={85}
+                step={1}
+                suffix="%"
+                onChange={(v) => applyCalib((c) => ({ ...c, horizonY: v / 100 }))}
+              />
+              <SliderRow
+                label="Ceiling height"
+                icon={Maximize2}
+                value={Math.round(calib.ceilingHeightM * 100)}
+                min={200}
+                max={500}
+                step={5}
                 suffix="cm"
-                onChange={(v) => applyCalib((c) => ({ ...c, farDepth: v / 100 }))}
+                onChange={(v) => applyCalib((c) => ({ ...c, ceilingHeightM: v / 100 }))}
               />
               <SliderRow
                 label="Furniture size"

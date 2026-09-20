@@ -11,15 +11,17 @@ import type { DepthField } from "./depth";
 
 export type Calibration = {
   fov: number;
-  nearDepth: number; // depth at the bottom of the frame (m)
-  farDepth: number; // depth near the top of the frame (m)
+  cameraHeightM: number; // how high the camera was held above the floor (m)
+  horizonY: number; // normalized y of eye level — where the floor plane vanishes
+  ceilingHeightM: number; // floor-to-ceiling height (m)
   scale: number; // global size multiplier
 };
 
 export const DEFAULT_CALIB: Calibration = {
   fov: 55,
-  nearDepth: 1.7,
-  farDepth: 6.5,
+  cameraHeightM: 1.5, // a person holding a phone
+  horizonY: 0.5, // level camera; AI analysis refines this per photo
+  ceilingHeightM: 2.7,
   scale: 0.9, // 90% reads more realistic than exact metric size in these rooms
 };
 
@@ -121,31 +123,78 @@ export function clampDragAnchor(
   return SCENE_CALIB ? groundAnchor(x, y, "floor") : { ax: x, ay: y };
 }
 
+/* How far away the floor (or ceiling) is at a given height on the photo.
+
+   This is real perspective, not a guess. The camera sits at the origin at
+   `cameraHeightM` above the floor, so a floor point `d` metres away projects
+   `cameraHeightM / d` below eye level — i.e. DEPTH GOES AS 1/y, and it runs to
+   infinity at the horizon. Interpolating depth linearly down the photo (what
+   this used to do) implies a camera whose height changes with every row of
+   pixels, which is why furniture agreed with neither the room nor itself: the
+   same chair came out ~2x too large near the bottom of the frame.
+
+   Because the depth now comes from one fixed camera, every floor piece lands on
+   a single flat plane and its on-screen size follows automatically. */
+const MIN_FROM_HORIZON = 0.02; // never divide by ~0 right at eye level
+const DEPTH_RANGE = { min: 0.4, max: 40 }; // metres — keeps a stray anchor sane
+
+export function planeDepth(
+  ay: number,
+  mount: "floor" | "ceiling",
+  calib: Calibration,
+): number {
+  const tanV = Math.tan(((calib.fov * Math.PI) / 180) / 2);
+  // Rise of the surface relative to the camera: the floor is below it, the
+  // ceiling is however much room is left above the lens.
+  const rise =
+    mount === "floor"
+      ? Math.max(0.2, calib.cameraHeightM)
+      : Math.max(0.2, calib.ceilingHeightM - calib.cameraHeightM);
+  const off =
+    mount === "floor"
+      ? ay - calib.horizonY // floor is below eye level
+      : calib.horizonY - ay; // ceiling is above it
+  const d = rise / (Math.max(MIN_FROM_HORIZON, off) * 2 * tanV);
+  return Math.min(DEPTH_RANGE.max, Math.max(DEPTH_RANGE.min, d));
+}
+
 export function anchorToPoint(
   ax: number,
   ay: number,
   aspect: number,
   calib: Calibration,
-  nearness: number, // 0..1 (1 = closest); from the depth map, or ay as fallback
+  mount: "floor" | "ceiling",
 ): THREE.Vector3 {
   const ndcX = ax * 2 - 1;
-  const ndcY = 1 - 2 * ay;
   const tanV = Math.tan(((calib.fov * Math.PI) / 180) / 2);
-  const d = calib.farDepth + (calib.nearDepth - calib.farDepth) * nearness;
-  return new THREE.Vector3(ndcX * tanV * aspect * d, ndcY * tanV * d, -d);
+  const d = planeDepth(ay, mount, calib);
+  /* Height comes from the plane itself rather than from the anchor's ndcY, so
+     the surface stays perfectly flat even when the horizon is off-centre (a
+     tilted camera). Everything on the floor shares one y. */
+  const y =
+    mount === "floor"
+      ? -Math.max(0.2, calib.cameraHeightM)
+      : Math.max(0.2, calib.ceilingHeightM - calib.cameraHeightM);
+  return new THREE.Vector3(ndcX * tanV * aspect * d, y, -d);
 }
 
 export function pointToAnchor(
   pt: THREE.Vector3,
   aspect: number,
   calib: Calibration,
+  mount: "floor" | "ceiling" = "floor",
 ): { ax: number; ay: number } {
   const tanV = Math.tan(((calib.fov * Math.PI) / 180) / 2);
-  const ndcX = pt.x / (tanV * aspect * -pt.z);
-  const ndcY = pt.y / (tanV * -pt.z);
+  const d = Math.max(DEPTH_RANGE.min, -pt.z);
+  const ndcX = pt.x / (tanV * aspect * d);
+  const rise =
+    mount === "floor"
+      ? Math.max(0.2, calib.cameraHeightM)
+      : Math.max(0.2, calib.ceilingHeightM - calib.cameraHeightM);
+  const off = rise / (d * 2 * tanV); // distance from the horizon, in anchor units
   return {
     ax: (ndcX + 1) / 2,
-    ay: (1 - ndcY) / 2,
+    ay: mount === "floor" ? calib.horizonY + off : calib.horizonY - off,
   };
 }
 
@@ -158,31 +207,18 @@ export function itemAnchor(item: PlacedItemDTO): { ax: number; ay: number } {
   return groundAnchor(ax, ay, item.product.mount);
 }
 
-/* Depth used for a piece's anchor projection. FLOOR furniture ignores the depth
-   map's Z entirely and derives its position from the screen anchor (a ground-plane
-   model) so it always rests on the floor and never floats on a depth artifact.
-   Ceiling fixtures still use the depth map. */
-function nearnessFor(
-  mount: "floor" | "ceiling",
-  ax: number,
-  ay: number,
-  depth: DepthField | null,
-): number {
-  if (mount === "ceiling") return depth ? depth.sample(ax, ay) : ay;
-  return ay;
-}
-
-/** World position of a placed item's base. */
+/** World position of a placed item's base.
+    `_depth` (the monocular depth map) is no longer consulted: the surface a
+    piece rests on is known geometry, and a depth-map artifact used to drag
+    pieces off that surface. Kept in the signature so call sites read the same. */
 export function itemWorldPos(
   item: PlacedItemDTO,
   aspect: number,
   calib: Calibration,
-  depth: DepthField | null,
+  _depth?: DepthField | null,
 ): THREE.Vector3 {
   const { ax, ay } = itemAnchor(item);
-  const nearness = nearnessFor(item.product.mount, ax, ay, depth);
-  const p = anchorToPoint(ax, ay, aspect, calib, nearness);
-  return p;
+  return anchorToPoint(ax, ay, aspect, calib, item.product.mount);
 }
 
 /** World XZ of a raw anchor for a given plane (used for collision boxes). */
@@ -192,9 +228,8 @@ function groundXZ(
   mount: "floor" | "ceiling",
   aspect: number,
   calib: Calibration,
-  depth: DepthField | null,
 ): { x: number; z: number } {
-  const p = anchorToPoint(ax, ay, aspect, calib, nearnessFor(mount, ax, ay, depth));
+  const p = anchorToPoint(ax, ay, aspect, calib, mount);
   return { x: p.x, z: p.z };
 }
 
@@ -284,7 +319,7 @@ export function obbOverlap(a: OBB, b: OBB): boolean {
 /** OBB footprint of a placed item, oriented by its full render yaw. */
 export function itemOBB(item: PlacedItemDTO, aspect: number, calib: Calibration, depth: DepthField | null): OBB {
   const { ax, ay } = itemAnchor(item);
-  const { x, z } = groundXZ(ax, ay, item.product.mount, aspect, calib, depth);
+  const { x, z } = groundXZ(ax, ay, item.product.mount, aspect, calib);
   const { hw, hd } = halfExtents(item.product.widthCm, item.product.depthCm, item.scale, calib);
   const angle = ((item.product.frontYaw + (depth?.roomYawDeg ?? 0) + item.rotationY) * Math.PI) / 180;
   return { cx: x, cz: z, hw, hd, angle };
@@ -292,7 +327,7 @@ export function itemOBB(item: PlacedItemDTO, aspect: number, calib: Calibration,
 
 /** OBB footprint of a candidate placement (inflated by the clearance gap). */
 function specOBB(ax: number, ay: number, spec: FootprintSpec, aspect: number, calib: Calibration, depth: DepthField | null): OBB {
-  const { x, z } = groundXZ(ax, ay, spec.mount, aspect, calib, depth);
+  const { x, z } = groundXZ(ax, ay, spec.mount, aspect, calib);
   const { hw, hd } = halfExtents(spec.widthCm, spec.depthCm, spec.scale, calib);
   return { cx: x, cz: z, hw: hw + GAP_M, hd: hd + GAP_M, angle: (spec.yawDeg * Math.PI) / 180 };
 }
@@ -323,10 +358,10 @@ export function floorCapacity(
   region: Region = floorRegion(),
 ): { totalM2: number; freeM2: number } {
   const corners: { x: number; z: number }[] = [
-    groundXZ(region.minX, region.minY, "floor", aspect, calib, depth),
-    groundXZ(region.maxX, region.minY, "floor", aspect, calib, depth),
-    groundXZ(region.maxX, region.maxY, "floor", aspect, calib, depth),
-    groundXZ(region.minX, region.maxY, "floor", aspect, calib, depth),
+    groundXZ(region.minX, region.minY, "floor", aspect, calib),
+    groundXZ(region.maxX, region.minY, "floor", aspect, calib),
+    groundXZ(region.maxX, region.maxY, "floor", aspect, calib),
+    groundXZ(region.minX, region.maxY, "floor", aspect, calib),
   ];
   let twice = 0;
   for (let i = 0; i < corners.length; i++) {
@@ -367,9 +402,9 @@ export function objectBoxToOBB(
 ): OBB {
   const axc = (box.x0 + box.x1) / 2;
   const ayb = box.y1; // bottom edge = where it meets the floor
-  const c = groundXZ(axc, ayb, "floor", aspect, calib, depth);
-  const left = groundXZ(box.x0, ayb, "floor", aspect, calib, depth);
-  const right = groundXZ(box.x1, ayb, "floor", aspect, calib, depth);
+  const c = groundXZ(axc, ayb, "floor", aspect, calib);
+  const left = groundXZ(box.x0, ayb, "floor", aspect, calib);
+  const right = groundXZ(box.x1, ayb, "floor", aspect, calib);
   // 2D box can't reveal room depth. Keep the footprint generous so we don't
   // accidentally spawn huge furniture inside real objects like wheelchairs!
   const hw = Math.max(0.15, (Math.hypot(right.x - left.x, right.z - left.z) / 2) * 0.95);
