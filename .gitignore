@@ -8,3 +8,7 @@ prisma/dev.db*
 .DS_Store
 next-env.d.ts
 tsconfig.tsbuildinfo
+
+# Source images for preview catalogue listings — synced to the server like /storage
+/Furniture
+/Furniture 2

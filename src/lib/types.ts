@@ -18,7 +18,10 @@ export type ProductDTO = {
   widthCm: number | null;
   depthCm: number | null;
   heightCm: number | null;
-  status: "PROCESSING" | "READY" | "FAILED";
+  /* PREVIEW = an image-only catalogue listing with no 3D model yet. It can be
+     browsed and priced in the marketplace but never placed in a room; attach a
+     modelUrl and flip it to READY when the real model lands. */
+  status: "PROCESSING" | "READY" | "FAILED" | "PREVIEW";
   thumbnailUrl: string;
   modelUrl: string | null;
   frontYaw: number; // yaw (°) that makes the model's front face the camera
