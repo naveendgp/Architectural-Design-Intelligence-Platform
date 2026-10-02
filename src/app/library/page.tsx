@@ -159,7 +159,7 @@ export default function LibraryPage() {
                     and priced, but the studio picker and the AI designer both
                     filter on modelUrl, so it can never be placed in a room. */}
                 <span className="absolute bottom-3 left-3 inline-flex items-center gap-1 glass !border-white/20 text-white text-[11px] font-medium px-2 py-1 rounded-full">
-                  {f.modelUrl ? "3D" : "Preview"}
+                  {f.status === "PREVIEW" ? "Preview" : "3D"}
                 </span>
               </div>
               <div className="p-4">
