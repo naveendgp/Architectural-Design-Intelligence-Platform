@@ -47,7 +47,12 @@ function glbBBox(file) {
 }
 
 const res = await db.execute(
-  "SELECT id, name, modelUrl, widthCm, depthCm, heightCm FROM Product WHERE modelUrl IS NOT NULL",
+  /* PREVIEW listings are excluded on purpose. They borrow another product's
+     model until their own exists, so syncing them would overwrite the real
+     size the piece is SOLD at with the stand-in's shape -- a 220cm shelf
+     tower started advertising itself as 19cm tall. Their footprint is a little
+     approximate until the real model lands; the catalogue stays truthful. */
+  "SELECT id, name, modelUrl, widthCm, depthCm, heightCm FROM Product WHERE modelUrl IS NOT NULL AND status != 'PREVIEW'",
 );
 
 const changes = [];

@@ -76,6 +76,22 @@ for (const t of targets) {
   done++;
 }
 
+/* Restore each listing's REAL dimensions from the catalogue manifest. Borrowing
+   a model must not change what the product claims to be: the renderer scales the
+   stand-in to this width, but the size shown to a buyer stays the real one. */
+if (APPLY) {
+  const manifest = JSON.parse(fs.readFileSync("scripts/data/preview-catalog.json", "utf8"));
+  let fixed = 0;
+  for (const m of manifest) {
+    const r = await db.execute({
+      sql: "UPDATE Product SET widthCm = ?, depthCm = ?, heightCm = ? WHERE name = ? AND status = 'PREVIEW'",
+      args: [m.w, m.d, m.h, m.name],
+    });
+    if (r.rowsAffected) fixed++;
+  }
+  console.log(`${fixed} listings restored to their catalogue dimensions.`);
+}
+
 console.log(picks.slice(0, 12).join("\n"));
 console.log(`...\n${done} listings ${APPLY ? "given" : "would get"} a stand-in model.`);
 if (!APPLY) console.log("Dry run — pass --apply to write.");
