@@ -2115,14 +2115,6 @@ function AddFurnitureSheet({
                           <Lightbulb className="h-3 w-3" /> Ceiling
                         </span>
                       )}
-                      {/* Honest label: this listing drops in a stand-in model
-                          until its own is produced, so the shape in the room
-                          won't match the photo on the card. */}
-                      {p.status === "PREVIEW" && (
-                        <span className="absolute top-2 right-2 inline-flex items-center rounded-md bg-amber-500/90 text-white px-1.5 py-0.5 text-[10px] font-medium">
-                          Preview
-                        </span>
-                      )}
                     </div>
                     <div className="p-2.5">
                       <p className="text-sm font-medium truncate">{p.name}</p>

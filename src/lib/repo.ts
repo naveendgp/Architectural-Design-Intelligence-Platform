@@ -49,7 +49,12 @@ export async function listProducts(filter?: {
   style?: string;
 }): Promise<ProductDTO[]> {
   await ensureDb();
-  const res = await db.execute("SELECT * FROM Product ORDER BY createdAt DESC");
+  /* Pieces with their own model come first and stand-ins last, so the strongest
+     work leads every catalogue view. Both the library and the studio picker only
+     filter this list, never re-sort it, so ordering here covers both. */
+  const res = await db.execute(
+    "SELECT * FROM Product ORDER BY CASE WHEN status = 'PREVIEW' THEN 1 ELSE 0 END, createdAt DESC",
+  );
   let items = (res.rows as unknown as Row[]).map(toProductDTO);
 
   if (filter?.q) {

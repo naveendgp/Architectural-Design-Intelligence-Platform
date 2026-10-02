@@ -155,12 +155,11 @@ export default function LibraryPage() {
                 >
                   <Trash2 className="h-[18px] w-[18px]" />
                 </button>
-                {/* A listing with no model is catalogue-only: it can be browsed
-                    and priced, but the studio picker and the AI designer both
-                    filter on modelUrl, so it can never be placed in a room. */}
-                <span className="absolute bottom-3 left-3 inline-flex items-center gap-1 glass !border-white/20 text-white text-[11px] font-medium px-2 py-1 rounded-full">
-                  {f.status === "PREVIEW" ? "Preview" : "3D"}
-                </span>
+                {f.modelUrl && (
+                  <span className="absolute bottom-3 left-3 inline-flex items-center gap-1 glass !border-white/20 text-white text-[11px] font-medium px-2 py-1 rounded-full">
+                    3D
+                  </span>
+                )}
               </div>
               <div className="p-4">
                 <p className="text-xs text-subtle">{f.category}</p>
