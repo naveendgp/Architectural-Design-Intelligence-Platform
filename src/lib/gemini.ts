@@ -335,9 +335,15 @@ RULES:
   each product's style tags, and match the room you can see in the photo.
 - Respect the SPACE above all. Keep the combined footprint within the cap and
   leave walking room. Under-filling is fine; overcrowding is not.
-- BUDGET: if the request names one (e.g. "under 5 lakhs", "₹2L", "50k"), convert
-  it to rupees in budgetInr (1 lakh = 100000) and keep the TOTAL of
-  price × qty at or under it. If no budget is mentioned, set budgetInr to 0.
+- BUDGET: only when the request names one (e.g. "under 5 lakhs", "₹2L", "50k") —
+  convert it to rupees in budgetInr (1 lakh = 100000) and keep the TOTAL of
+  price × qty at or under it.
+  If the request names NO budget, set budgetInr to 0 and IGNORE PRICE COMPLETELY.
+  Every catalog line shows a price, but with no budget stated it carries no
+  weight at all: not a tiebreaker, not a reason to hold back, not a reason to
+  prefer the cheaper of two pieces. Choose purely on what the room and the style
+  need, and reach for the best pieces the catalog has. Quietly economising on a
+  luxury brief is a failure to deliver what was asked.
 - FURNISH THE ROOM COMPLETELY. A brief like "make it minimal" or "turn this into
   a luxury office" asks you to finish the WHOLE room, not to add an accent or
   two. Work out the room's PROGRAMME first — what people will actually do in
