@@ -229,7 +229,12 @@ export type DesignPlan = {
   surfaceOptions?: { label: string; instruction: string; reason: string }[];
 };
 
-const MAX_PLAN_LINES = 8;
+/* A whole-room redesign has to cover every role the space needs — work surface,
+   seating, storage, surfaces, layered light — so the plan has room for more
+   lines than an accent purchase would. Anything that doesn't physically fit is
+   dropped by the caller's dry-run through the real packer, so aiming full is
+   safe; aiming small left rooms looking unfinished. */
+const MAX_PLAN_LINES = 14;
 const MAX_QTY_PER_LINE = 6;
 
 /**
@@ -274,7 +279,7 @@ export async function designPlan(
      accounted for before we get here. Anything the model still over-orders is
      trimmed by the caller's dry-run through the real packer, so erring slightly
      full costs nothing while erring empty leaves rooms bare. */
-  const usableM2 = capacity ? capacity.freeFloorM2 * 0.6 : 0;
+  const usableM2 = capacity ? capacity.freeFloorM2 * 0.78 : 0;
   const capacityBlock = capacity
     ? `MEASURED SPACE (from the app's own floor geometry — trust these numbers over
 your impression of the photo):
@@ -284,8 +289,9 @@ your impression of the photo):
   ${usableM2.toFixed(1)} m² (width × depth, summed over every piece including
   duplicates). The remaining floor is walking space and must stay clear.
 - Work this out explicitly as you choose: a 220×95cm sofa is 2.1 m², a 55×58cm
-  chair is 0.3 m². Stop adding pieces once you approach the cap. It is much
-  better to propose two pieces that fit beautifully than six that crowd the room.`
+  chair is 0.3 m². Use that budget — a redesigned room should come close to the
+  cap, not stop at a third of it. Keep walking routes clear, and stop at the cap
+  rather than exceeding it.`
     : `SPACE: judge the usable floor from the photo. A narrow corridor or lift lobby
 fits perhaps 2-4 small pieces against the walls — NOT a full living-room set.`;
 
@@ -332,8 +338,22 @@ RULES:
 - BUDGET: if the request names one (e.g. "under 5 lakhs", "₹2L", "50k"), convert
   it to rupees in budgetInr (1 lakh = 100000) and keep the TOTAL of
   price × qty at or under it. If no budget is mentioned, set budgetInr to 0.
-- Prefer a well-composed small set over quantity. Quantities must be sensible for
-  the space: at most ${MAX_QTY_PER_LINE} of any one piece, at most ${MAX_PLAN_LINES} distinct pieces.
+- FURNISH THE ROOM COMPLETELY. A brief like "make it minimal" or "turn this into
+  a luxury office" asks you to finish the WHOLE room, not to add an accent or
+  two. Work out the room's PROGRAMME first — what people will actually do in
+  here — then cover every role that applies, up to the space cap:
+    * the piece the room exists for — a desk for an office, a conference table
+      for a meeting room, a sofa for a lounge, a bed for a bedroom
+    * seating for everyone it serves, including visitors
+    * storage, because a room with nowhere to put anything never reads finished
+    * surfaces within reach of the seating — side, coffee or console tables
+    * LAYERED LIGHT: a ceiling fixture where the ceiling is visible, plus a floor
+      or table lamp. One ceiling light alone is not a lighting scheme.
+    * an accent piece or two where the style calls for it
+  A "luxury office" answered with a chair and a stool has not been designed. If
+  the catalog has nothing for a role, skip that role silently — never invent an id.
+- Quantities must suit the space: at most ${MAX_QTY_PER_LINE} of any one piece, at
+  most ${MAX_PLAN_LINES} distinct pieces.
 - Don't duplicate what the room already has unless the user asked for more.
 - Ceiling-mounted fixtures only make sense if the ceiling is visible in the photo.
 - reason: one short phrase per line saying why that piece (e.g. "seating for
@@ -351,11 +371,15 @@ RULES:
   Each option needs:
     - instruction: name EVERY change the room needs to actually reach the look,
       as one explicit list. Repainting a wall alone rarely transforms a dated
-      room — look at the photo and say what is holding it back. Cover, where
-      they apply: flooring, wall finish, ceiling treatment, architectural
-      lighting, and the REMOVAL of specific dated or cluttering things you can
-      see. Name each item literally, because a strict photo editor executes
-      exactly this list and nothing else.
+      room — look at the photo and say what is holding it back. Name each item
+      literally, because a strict photo editor executes exactly this list and
+      nothing else.
+      When the brief is the room as a whole ("make it minimal", "a luxury
+      office"), the FLOOR and the WALLS must BOTH be re-specified in every
+      option — those two surfaces are most of what anyone sees, and changing
+      only one leaves the old room showing through. Then add, where they apply:
+      ceiling treatment, architectural lighting, window treatment, and the
+      REMOVAL of specific dated or cluttering things you can see.
     - SPECIFY MATERIALS, NOT COLOURS. "Paint the walls beige" is decorating; a
       designer specifies a finish. Say what the surface IS: polished marble or
       large-format porcelain flooring with real reflections, full-height walnut

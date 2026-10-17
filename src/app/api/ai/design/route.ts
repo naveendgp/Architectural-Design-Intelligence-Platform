@@ -38,8 +38,13 @@ export async function POST(req: Request) {
   const [, mime, b64] = match;
   const buffer = Buffer.from(b64, "base64");
 
-  // Only READY products with a usable 3D model can actually be placed.
-  const products = (await listProducts()).filter((p) => p.status === "READY" && p.modelUrl);
+  /* Everything the room can actually receive — a product is placeable as soon as
+     it has a model, whether that model is its own or a stand-in. Restricting the
+     designer to READY hid half the catalogue from it: every desk, task chair,
+     meeting table and office storage wall sits in the newer listings, so a
+     "luxury office" brief could only reach for living-room pieces and came back
+     with a stool and a chair. */
+  const products = (await listProducts()).filter((p) => p.modelUrl);
   if (products.length === 0) {
     return Response.json({ error: "catalog is empty", code: "empty" }, { status: 409 });
   }
