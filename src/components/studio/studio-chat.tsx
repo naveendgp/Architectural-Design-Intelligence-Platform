@@ -47,8 +47,25 @@ type Msg = {
   chose?: string;
 };
 
-/** Detect a request to modify the room itself (surfaces), not add furniture. */
+/* Detect a request to change the room's SURFACES ONLY — wallpaper, paint,
+   flooring — which can go straight to a single image edit.
+
+   This has to stay NARROW. A whole-room brief ("redesign this as a minimal
+   office — update the walls, flooring, furniture and lighting") names flooring
+   too, and catching it here sent the user's own words to the image editor: it
+   PAINTED a desk and chair into the photo and seated nothing, so the room
+   looked furnished while the room total stayed ₹0. Anything that asks for a
+   redesign, names furniture, or names a use for the room belongs to the
+   planner, which finishes the surfaces AND places real models. */
 function isRoomEdit(t: string): boolean {
+  // A design brief is never a plain surface edit, however many surfaces it lists.
+  if (/\b(re-?design|re-?do|makeover|revamp|transform|convert|furnish|stage)\b/.test(t)) return false;
+  if (/\b(turn|make|convert)\b[^.]*\binto\b/.test(t)) return false;
+  // Naming furniture, decor or lighting means pieces have to be placed.
+  if (/\b(furniture|furnishings?|decor|sofas?|couch|chairs?|desks?|tables?|beds?|wardrobes?|cabinets?|shelves|shelving|lamps?|lighting|seating|storage)\b/.test(t)) return false;
+  // Naming a PURPOSE means the room has to be furnished for it.
+  if (/\b(office|workspace|waiting area|lounge|reception|lobby|bedroom|living room|dining|study|conference|meeting room|cabin)\b/.test(t)) return false;
+
   if (/\b(wallpaper|curtains?|blinds?|drapes?|repaint|flooring)\b/.test(t)) return true;
   const feature = /\b(wall|walls|floor|ceiling|tiles?)\b/.test(t);
   const verb = /\b(paint|colou?r|change|make|remove|replace|new|swap)\b/.test(t);
@@ -130,7 +147,22 @@ export function StudioChat({
   const endRef = useRef<HTMLDivElement>(null);
   // Message ids must be unique: Date.now()+N collided when two messages were
   // pushed within the same millisecond, duplicating React keys.
+  /* The composer grows with the prompt. It was a one-row textarea with no
+     resize, so a paragraph-long brief — the kind this bar is FOR — scrolled
+     inside a single visible line and you couldn't read back what you'd typed. */
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const COMPOSER_MAX_PX = 168; // ~7 lines, then it scrolls
+
   const idRef = useRef(0);
+
+  /* Match the box to the text on every keystroke: collapse to measure, then
+     grow to the content up to the cap, after which it scrolls. */
+  useEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_PX)}px`;
+  }, [input]);
   const nextId = () => ++idRef.current;
 
   // Mirror of the analysis counter so an async flow can await the next one.
@@ -715,6 +747,7 @@ export function StudioChat({
           {tools}
 
           <textarea
+            ref={taRef}
             rows={1}
             value={input}
             disabled={busy}
@@ -732,7 +765,8 @@ export function StudioChat({
                 : "Describe the space you want - I'll design it from the marketplace"
             }
             aria-label="Message"
-            className="flex-1 resize-none bg-transparent py-2 outline-none text-sm placeholder:text-subtle max-h-28 disabled:opacity-60"
+            className="flex-1 resize-none bg-transparent py-2 outline-none text-sm placeholder:text-subtle disabled:opacity-60 overflow-y-auto leading-relaxed"
+            style={{ maxHeight: COMPOSER_MAX_PX }}
           />
 
           {!empty && !expanded && (

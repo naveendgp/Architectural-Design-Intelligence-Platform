@@ -895,6 +895,12 @@ export async function editRoomImage(
 room. Apply EXACTLY the following change(s) to it, and nothing else: "${instruction}".
 
 STRICT RULES — do not hallucinate:
+- NEVER ADD FURNITURE. This photo is the empty shell a room is designed on: the
+  desks, chairs, sofas, tables and lamps are placed afterwards as real 3D models
+  from a catalogue, and anything you paint in here cannot be moved, priced or
+  removed by the user. Even if the instruction mentions furniture, lighting or
+  decor, change only the SURFACES it names — floor, walls, ceiling, window
+  treatment — and leave the furnishing to the models.
 - Do ONLY what the instruction literally says. Where it lists several changes, make
   every one of them — but still nothing beyond them. Do NOT add, invent, or introduce
   any new object, furniture, decor, plant, rug, lamp, artwork, or texture that the
