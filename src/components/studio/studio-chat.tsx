@@ -110,6 +110,7 @@ export function StudioChat({
   pendingPrompt,
   onPendingPromptHandled,
   analysisNonce,
+  inPanel = false,
 }: {
   products: ProductDTO[];
   /** Places one piece. Resolves false when the room has no space for it. */
@@ -133,6 +134,9 @@ export function StudioChat({
   ) => Promise<{ added: number; skipped: string[] }>;
   /** Manual tools, rendered inside the bar behind a "+" so they don't take a row. */
   tools?: React.ReactNode;
+  /** Living inside the studio's side panel rather than floating over the room:
+      flush with the panel, conversation always open, no overlay chrome. */
+  inPanel?: boolean;
   /** Openers are only worth screen space while the room is still empty. */
   roomEmpty?: boolean;
   /** A prompt pushed in from the tool menu (e.g. a flooring preset). */
@@ -158,14 +162,15 @@ export function StudioChat({
      in CSS; this is only for BEHAVIOUR that genuinely differs — in the rail the
      conversation sits beside the room rather than over it, so the reflex to get
      out of the way no longer applies. */
-  const [railed, setRailed] = useState(false);
+  const [wide, setWide] = useState(false);
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 1024px)");
-    const sync = () => setRailed(mq.matches);
+    const sync = () => setWide(mq.matches);
     sync();
     mq.addEventListener("change", sync);
     return () => mq.removeEventListener("change", sync);
   }, []);
+  const railed = inPanel || wide;
 
   const taRef = useRef<HTMLTextAreaElement>(null);
   const COMPOSER_MAX_PX = 168; // ~7 lines, then it scrolls
@@ -672,7 +677,31 @@ export function StudioChat({
     /* The studio's primary control. Positioning is owned by the page's bottom
        cluster so the manual tool dock stacks above this instead of overlapping
        it; here we only lay out conversation → suggestions → prompt bar. */
-    <div className="w-full flex flex-col items-center gap-2 pointer-events-none lg:h-full lg:items-stretch lg:justify-end lg:min-h-0">
+    <div
+      className={cn(
+        "w-full flex flex-col gap-2",
+        inPanel
+          ? "h-full min-h-0 items-stretch justify-end"
+          : "items-center pointer-events-none lg:h-full lg:items-stretch lg:justify-end lg:min-h-0",
+      )}
+    >
+      {/* In the panel there is real estate to fill before the first message, and
+          an empty column reads as broken rather than ready. */}
+      {inPanel && empty && (
+        <div className="flex-1 min-h-0 grid place-items-center px-6 text-center">
+          <div>
+            <span className="mx-auto mb-3 grid place-items-center h-11 w-11 rounded-2xl brand-gradient text-white">
+              <Sparkles className="h-5 w-5" />
+            </span>
+            <p className="font-semibold tracking-tight">AI Designer</p>
+            <p className="text-sm text-muted mt-1.5 leading-relaxed">
+              Describe the space you want. I&apos;ll finish the room and furnish it
+              from your marketplace.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Conversation — only once there is something to show */}
       <AnimatePresence>
         {expanded && !empty && (
@@ -681,7 +710,12 @@ export function StudioChat({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 12, scale: 0.98 }}
             transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-            className="pointer-events-auto w-[min(780px,100%)] rounded-[22px] bg-surface/95 backdrop-blur-2xl border border-border shadow-2xl overflow-hidden lg:w-full lg:flex-1 lg:min-h-0 lg:flex lg:flex-col"
+            className={cn(
+              "pointer-events-auto overflow-hidden",
+              inPanel
+                ? "w-full flex-1 min-h-0 flex flex-col"
+                : "w-[min(780px,100%)] rounded-[22px] bg-surface/95 backdrop-blur-2xl border border-border shadow-2xl lg:w-full lg:flex-1 lg:min-h-0 lg:flex lg:flex-col",
+            )}
           >
             <div className="flex items-center gap-2.5 px-4 h-12 border-b border-border/70 shrink-0">
               <span className="grid place-items-center h-7 w-7 rounded-full brand-gradient text-white shrink-0">
@@ -708,16 +742,23 @@ export function StudioChat({
                   <RotateCcw className="h-3 w-3" /> Revert
                 </button>
               )}
-              <button
-                onClick={() => setExpanded(false)}
-                aria-label="Collapse conversation"
-                className="grid place-items-center h-7 w-7 rounded-full text-muted hover:bg-surface-muted transition-colors shrink-0"
-              >
-                <ChevronDown className="h-4 w-4" />
-              </button>
+              {!inPanel && (
+                <button
+                  onClick={() => setExpanded(false)}
+                  aria-label="Collapse conversation"
+                  className="grid place-items-center h-7 w-7 rounded-full text-muted hover:bg-surface-muted transition-colors shrink-0"
+                >
+                  <ChevronDown className="h-4 w-4" />
+                </button>
+              )}
             </div>
 
-            <div className="max-h-[min(46vh,440px)] overflow-y-auto px-4 py-4 space-y-4 lg:max-h-none lg:flex-1 lg:min-h-0">
+            <div
+              className={cn(
+                "overflow-y-auto px-4 py-4 space-y-4",
+                inPanel ? "flex-1 min-h-0" : "max-h-[min(46vh,440px)] lg:max-h-none lg:flex-1 lg:min-h-0",
+              )}
+            >
               {messages.map((m) => (
                 <Bubble
                   key={m.id}
@@ -742,7 +783,7 @@ export function StudioChat({
       {/* Openers — only while the room is still empty and nothing has been asked,
           so they stop competing with the room once work is under way. */}
       {empty && roomEmpty && suggestions.length > 0 && (
-        <div className="pointer-events-auto w-[min(780px,100%)] flex flex-wrap justify-center gap-1.5 lg:w-full lg:justify-start">
+        <div className={cn("pointer-events-auto flex flex-wrap gap-1.5", inPanel ? "w-full" : "w-[min(780px,100%)] justify-center lg:w-full lg:justify-start")}>
           {suggestions.map((s) => (
             <button
               key={s.label}
@@ -757,7 +798,7 @@ export function StudioChat({
       )}
 
       {/* The prompt bar itself — the widest, most prominent control on screen */}
-      <div className="pointer-events-auto w-[min(780px,100%)] lg:w-full">
+      <div className={cn("pointer-events-auto", inPanel ? "w-full" : "w-[min(780px,100%)] lg:w-full")}>
         <div className="flex items-end gap-2 pl-3 pr-2 py-2 rounded-[20px] bg-surface/95 backdrop-blur-2xl border border-border shadow-[var(--shadow-lg)] focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10 transition-all">
           <span className="grid place-items-center h-8 w-8 rounded-full brand-gradient text-white shrink-0">
             <Sparkles className="h-4 w-4" />  

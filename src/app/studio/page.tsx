@@ -130,7 +130,10 @@ function Studio() {
   const [lightingNonce, setInstalledLightsNonce] = useState(0);
   const [addFilter, setAddFilter] = useState<"all" | "ceiling">("all");
   const [products, setProducts] = useState<ProductDTO[]>([]);
-  const [panel, setPanel] = useState<"properties" | "calibrate">("properties");
+  /* The side panel's two tabs. The AI Designer is the app's main feature, so it
+     owns the panel by default; calibration is a rarely-touched fine-tuning tool
+     and now lives at the bottom of Properties rather than taking a tab of its own. */
+  const [panel, setPanel] = useState<"designer" | "properties">("designer");
   const [calib, setCalib] = useState<Calibration>(DEFAULT_CALIB);
   const [scaleFitBusy, setScaleFitBusy] = useState(false);
   const [depth, setDepth] = useState<DepthField | null>(null);
@@ -1046,10 +1049,277 @@ const isWorkSurface = (p: ProductDTO) =>
     api.deletePlacement(id).catch(() => {});
   }, [selectedId]);
 
+  /* Does the side panel exist? It appears at xl, and that is where the Designer
+     lives when it does. Tailwind alone can't decide this: the two homes are in
+     different parts of the tree, so the choice has to be made in JS to keep a
+     single mount. */
+  const [panelMode, setPanelMode] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1280px)");
+    const sync = () => setPanelMode(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
   // ---- Empty / loading states -------------------------------------------
   if (!projectId) {
     return <NoProject />;
   }
+
+  /* The Designer, built once. It is mounted EITHER in the side panel (from xl,
+     where the panel exists) or floating over the room below that — never both,
+     since a second mount is a second conversation with its own state. */
+  const chatEl = (
+        <StudioChat
+        inPanel={panelMode}
+          products={products}
+          onAdd={addFurniture}
+          projectId={projectId ?? undefined}
+          photoUrl={project?.photoUrl}
+          onRoomEdited={onRoomEdited}
+          onRevert={revertRoom}
+          edited={roomEdited}
+          capture={captureStage}
+          placed={placedSummary}
+          capacity={roomCapacity}
+          onFitPlan={fitPlan}
+          onApplyPlan={addFurnitureBatch}
+          roomEmpty={items.length === 0}
+          analysisNonce={analysisNonce}
+          pendingPrompt={pendingPrompt}
+          onPendingPromptHandled={() => setPendingPrompt(null)}
+          tools={
+            <div className="relative shrink-0">
+              {(toolsOpen || measureMenuOpen || surfaceMenu) && (
+                <button
+                  aria-label="Close tools"
+                  onClick={() => {
+                    setToolsOpen(false);
+                    setMeasureMenuOpen(false);
+                    setSurfaceMenu(null);
+                  }}
+                  className="fixed inset-0 z-0 cursor-default"
+                />
+              )}
+              <button
+                onClick={() => {
+                  if (measureMenuOpen) setMeasureMenuOpen(false);
+                  if (surfaceMenu) setSurfaceMenu(null);
+                  setToolsOpen((o) => !o);
+                }}
+                title="Tools"
+                aria-label="Tools"
+                aria-expanded={toolsOpen}
+                className={cn(
+                  "relative z-10 grid place-items-center h-9 w-9 rounded-xl transition-colors",
+                  toolsOpen || measureMenuOpen || surfaceMenu
+                    ? "bg-primary/10 text-primary"
+                    : "text-muted hover:bg-surface-muted hover:text-foreground",
+                )}
+              >
+                <Plus className={cn("h-5 w-5 transition-transform", toolsOpen && "rotate-45")} />
+              </button>
+
+              <AnimatePresence>
+                {/* Flooring / wall presets — one click sends the AI a request,
+                    which then asks for confirmation before repainting. */}
+                {surfaceMenu && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8, scale: 0.97 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 8, scale: 0.97 }}
+                    className="absolute bottom-full left-0 z-10 mb-2 w-60 bg-white dark:bg-zinc-900 border border-border rounded-2xl shadow-[var(--shadow-lg)] p-1.5"
+                  >
+                    <button
+                      onClick={() => {
+                        setSurfaceMenu(null);
+                        setToolsOpen(true);
+                      }}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted hover:text-foreground transition-colors"
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" /> Tools
+                    </button>
+                    {(surfaceMenu === "floor" ? FLOOR_PRESETS : WALL_PRESETS).map((preset) => (
+                      <ToolItem
+                        key={preset.label}
+                        icon={
+                          <span
+                            className="h-4 w-4 rounded-full border border-black/10 dark:border-white/15"
+                            style={{ background: preset.swatch }}
+                          />
+                        }
+                        label={preset.label}
+                        onClick={() => {
+                          setSurfaceMenu(null);
+                          setPendingPrompt(preset.prompt);
+                        }}
+                      />
+                    ))}
+                  </motion.div>
+                )}
+
+                {/* Measure options replace the tool list rather than nesting. */}
+                {measureMenuOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8, scale: 0.97 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 8, scale: 0.97 }}
+                    className="absolute bottom-full left-0 z-10 mb-2 w-72 bg-white dark:bg-zinc-900 border border-border rounded-2xl shadow-[var(--shadow-lg)] p-4 space-y-4"
+                  >
+                    <button
+                      onClick={() => {
+                        setMeasureMenuOpen(false);
+                        setToolsOpen(true);
+                      }}
+                      className="flex items-center gap-1.5 text-xs font-medium text-muted hover:text-foreground transition-colors"
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" /> Tools
+                    </button>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold">Product dimensions</span>
+                      <Toggle
+                        checked={measureConfig.productDims}
+                        onChange={(c) => setMeasureConfig(m => ({ ...m, productDims: c }))}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold">Product spacing</span>
+                      <Toggle
+                        checked={measureConfig.productSpacing}
+                        onChange={(c) => setMeasureConfig(m => ({ ...m, productSpacing: c }))}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold">Room dimensions</span>
+                      <Toggle
+                        checked={measureConfig.roomDims}
+                        onChange={(c) => setMeasureConfig(m => ({ ...m, roomDims: c }))}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold">
+                        Detected objects
+                        {realObjects.length > 0 ? ` (${realObjects.length})` : ""}
+                      </span>
+                      <Toggle checked={showDetected} onChange={setShowDetected} />
+                    </div>
+                    <div className="flex items-center justify-between pt-3 border-t border-border">
+                      <span className="text-sm font-semibold">Unit</span>
+                      <div className="flex w-32 bg-surface-muted rounded-xl border border-border p-1">
+                        <button
+                          onClick={() => setMeasureConfig(m => ({ ...m, unit: "ft" }))}
+                          className={cn(
+                            "flex-1 h-8 text-xs font-bold rounded-lg transition-all",
+                            measureConfig.unit === "ft" ? "bg-white dark:bg-zinc-800 shadow-sm text-foreground" : "text-muted hover:text-foreground"
+                          )}
+                        >
+                          ft
+                        </button>
+                        <button
+                          onClick={() => setMeasureConfig(m => ({ ...m, unit: "cm" }))}
+                          className={cn(
+                            "flex-1 h-8 text-xs font-bold rounded-lg transition-all",
+                            measureConfig.unit === "cm" ? "bg-white dark:bg-zinc-800 shadow-sm text-foreground" : "text-muted hover:text-foreground"
+                          )}
+                        >
+                          cm
+                        </button>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {toolsOpen && !measureMenuOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8, scale: 0.97 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 8, scale: 0.97 }}
+                    className="absolute bottom-full left-0 z-10 mb-2 w-56 bg-white dark:bg-zinc-900 border border-border rounded-2xl shadow-[var(--shadow-lg)] p-1.5"
+                  >
+                    <ToolItem
+                      icon={<Plus className="h-4 w-4 text-primary" />}
+                      label="Add furniture"
+                      onClick={() => {
+                        setAddFilter("all");
+                        setAddOpen(true);
+                        setToolsOpen(false);
+                      }}
+                    />
+                    <ToolItem
+                      icon={<Lightbulb className="h-4 w-4" />}
+                      label="Add a ceiling light"
+                      onClick={() => {
+                        setAddFilter("ceiling");
+                        setAddOpen(true);
+                        setToolsOpen(false);
+                      }}
+                    />
+                    <ToolItem
+                      icon={rearranging ? <Loader2 className="h-4 w-4 animate-spin text-primary" /> : <Shuffle className="h-4 w-4" />}
+                      label="Auto-arrange room"
+                      disabled={rearranging || items.length < 2}
+                      onClick={() => {
+                        setToolsOpen(false);
+                        rearrangeRoom();
+                      }}
+                    />
+                    <ToolItem
+                      icon={<Grid2x2 className="h-4 w-4" />}
+                      label="Change flooring"
+                      onClick={() => {
+                        setToolsOpen(false);
+                        setSurfaceMenu("floor");
+                      }}
+                    />
+                    <ToolItem
+                      icon={<Paintbrush className="h-4 w-4" />}
+                      label="Change wall panel"
+                      onClick={() => {
+                        setToolsOpen(false);
+                        setSurfaceMenu("wall");
+                      }}
+                    />
+                    <ToolItem
+                      icon={
+                        swappingPhoto ? (
+                          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                        ) : (
+                          <ImagePlus className="h-4 w-4" />
+                        )
+                      }
+                      label="Change room photo"
+                      disabled={swappingPhoto}
+                      onClick={() => {
+                        setToolsOpen(false);
+                        roomPhotoInputRef.current?.click();
+                      }}
+                    />
+                    {roomEdited && (
+                      <ToolItem
+                        icon={<RotateCcw className="h-4 w-4" />}
+                        label="Revert room photo"
+                        onClick={() => {
+                          setToolsOpen(false);
+                          revertRoom();
+                        }}
+                      />
+                    )}
+                    <ToolItem
+                      icon={<Ruler className="h-4 w-4" />}
+                      label="Measurements"
+                      onClick={() => {
+                        setToolsOpen(false);
+                        setMeasureMenuOpen(true);
+                      }}
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          }
+        />
+  );
 
   return (
     <div className="flex h-svh overflow-hidden">
@@ -1309,255 +1579,15 @@ const isWorkSurface = (p: ProductDTO) =>
             collide with Render Scene. No offset is needed for the properties
             panel: that is a sibling column, so this container already ends where
             it begins and the rail lands right beside it. */}
-        <div className="absolute inset-x-0 bottom-4 z-30 flex flex-col items-center gap-2 px-4 pointer-events-none lg:inset-x-auto lg:right-4 lg:top-20 lg:w-[360px] lg:items-stretch lg:justify-end lg:px-0">
-          <StudioChat
-            products={products}
-            onAdd={addFurniture}
-            projectId={projectId ?? undefined}
-            photoUrl={project?.photoUrl}
-            onRoomEdited={onRoomEdited}
-            onRevert={revertRoom}
-            edited={roomEdited}
-            capture={captureStage}
-            placed={placedSummary}
-            capacity={roomCapacity}
-            onFitPlan={fitPlan}
-            onApplyPlan={addFurnitureBatch}
-            roomEmpty={items.length === 0}
-            analysisNonce={analysisNonce}
-            pendingPrompt={pendingPrompt}
-            onPendingPromptHandled={() => setPendingPrompt(null)}
-            tools={
-              <div className="relative shrink-0">
-                {(toolsOpen || measureMenuOpen || surfaceMenu) && (
-                  <button
-                    aria-label="Close tools"
-                    onClick={() => {
-                      setToolsOpen(false);
-                      setMeasureMenuOpen(false);
-                      setSurfaceMenu(null);
-                    }}
-                    className="fixed inset-0 z-0 cursor-default"
-                  />
-                )}
-                <button
-                  onClick={() => {
-                    if (measureMenuOpen) setMeasureMenuOpen(false);
-                    if (surfaceMenu) setSurfaceMenu(null);
-                    setToolsOpen((o) => !o);
-                  }}
-                  title="Tools"
-                  aria-label="Tools"
-                  aria-expanded={toolsOpen}
-                  className={cn(
-                    "relative z-10 grid place-items-center h-9 w-9 rounded-xl transition-colors",
-                    toolsOpen || measureMenuOpen || surfaceMenu
-                      ? "bg-primary/10 text-primary"
-                      : "text-muted hover:bg-surface-muted hover:text-foreground",
-                  )}
-                >
-                  <Plus className={cn("h-5 w-5 transition-transform", toolsOpen && "rotate-45")} />
-                </button>
-
-                <AnimatePresence>
-                  {/* Flooring / wall presets — one click sends the AI a request,
-                      which then asks for confirmation before repainting. */}
-                  {surfaceMenu && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 8, scale: 0.97 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 8, scale: 0.97 }}
-                      className="absolute bottom-full left-0 z-10 mb-2 w-60 bg-white dark:bg-zinc-900 border border-border rounded-2xl shadow-[var(--shadow-lg)] p-1.5"
-                    >
-                      <button
-                        onClick={() => {
-                          setSurfaceMenu(null);
-                          setToolsOpen(true);
-                        }}
-                        className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted hover:text-foreground transition-colors"
-                      >
-                        <ChevronLeft className="h-3.5 w-3.5" /> Tools
-                      </button>
-                      {(surfaceMenu === "floor" ? FLOOR_PRESETS : WALL_PRESETS).map((preset) => (
-                        <ToolItem
-                          key={preset.label}
-                          icon={
-                            <span
-                              className="h-4 w-4 rounded-full border border-black/10 dark:border-white/15"
-                              style={{ background: preset.swatch }}
-                            />
-                          }
-                          label={preset.label}
-                          onClick={() => {
-                            setSurfaceMenu(null);
-                            setPendingPrompt(preset.prompt);
-                          }}
-                        />
-                      ))}
-                    </motion.div>
-                  )}
-
-                  {/* Measure options replace the tool list rather than nesting. */}
-                  {measureMenuOpen && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 8, scale: 0.97 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 8, scale: 0.97 }}
-                      className="absolute bottom-full left-0 z-10 mb-2 w-72 bg-white dark:bg-zinc-900 border border-border rounded-2xl shadow-[var(--shadow-lg)] p-4 space-y-4"
-                    >
-                      <button
-                        onClick={() => {
-                          setMeasureMenuOpen(false);
-                          setToolsOpen(true);
-                        }}
-                        className="flex items-center gap-1.5 text-xs font-medium text-muted hover:text-foreground transition-colors"
-                      >
-                        <ChevronLeft className="h-3.5 w-3.5" /> Tools
-                      </button>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-semibold">Product dimensions</span>
-                        <Toggle
-                          checked={measureConfig.productDims}
-                          onChange={(c) => setMeasureConfig(m => ({ ...m, productDims: c }))}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-semibold">Product spacing</span>
-                        <Toggle
-                          checked={measureConfig.productSpacing}
-                          onChange={(c) => setMeasureConfig(m => ({ ...m, productSpacing: c }))}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-semibold">Room dimensions</span>
-                        <Toggle
-                          checked={measureConfig.roomDims}
-                          onChange={(c) => setMeasureConfig(m => ({ ...m, roomDims: c }))}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-semibold">
-                          Detected objects
-                          {realObjects.length > 0 ? ` (${realObjects.length})` : ""}
-                        </span>
-                        <Toggle checked={showDetected} onChange={setShowDetected} />
-                      </div>
-                      <div className="flex items-center justify-between pt-3 border-t border-border">
-                        <span className="text-sm font-semibold">Unit</span>
-                        <div className="flex w-32 bg-surface-muted rounded-xl border border-border p-1">
-                          <button
-                            onClick={() => setMeasureConfig(m => ({ ...m, unit: "ft" }))}
-                            className={cn(
-                              "flex-1 h-8 text-xs font-bold rounded-lg transition-all",
-                              measureConfig.unit === "ft" ? "bg-white dark:bg-zinc-800 shadow-sm text-foreground" : "text-muted hover:text-foreground"
-                            )}
-                          >
-                            ft
-                          </button>
-                          <button
-                            onClick={() => setMeasureConfig(m => ({ ...m, unit: "cm" }))}
-                            className={cn(
-                              "flex-1 h-8 text-xs font-bold rounded-lg transition-all",
-                              measureConfig.unit === "cm" ? "bg-white dark:bg-zinc-800 shadow-sm text-foreground" : "text-muted hover:text-foreground"
-                            )}
-                          >
-                            cm
-                          </button>
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-
-                  {toolsOpen && !measureMenuOpen && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 8, scale: 0.97 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 8, scale: 0.97 }}
-                      className="absolute bottom-full left-0 z-10 mb-2 w-56 bg-white dark:bg-zinc-900 border border-border rounded-2xl shadow-[var(--shadow-lg)] p-1.5"
-                    >
-                      <ToolItem
-                        icon={<Plus className="h-4 w-4 text-primary" />}
-                        label="Add furniture"
-                        onClick={() => {
-                          setAddFilter("all");
-                          setAddOpen(true);
-                          setToolsOpen(false);
-                        }}
-                      />
-                      <ToolItem
-                        icon={<Lightbulb className="h-4 w-4" />}
-                        label="Add a ceiling light"
-                        onClick={() => {
-                          setAddFilter("ceiling");
-                          setAddOpen(true);
-                          setToolsOpen(false);
-                        }}
-                      />
-                      <ToolItem
-                        icon={rearranging ? <Loader2 className="h-4 w-4 animate-spin text-primary" /> : <Shuffle className="h-4 w-4" />}
-                        label="Auto-arrange room"
-                        disabled={rearranging || items.length < 2}
-                        onClick={() => {
-                          setToolsOpen(false);
-                          rearrangeRoom();
-                        }}
-                      />
-                      <ToolItem
-                        icon={<Grid2x2 className="h-4 w-4" />}
-                        label="Change flooring"
-                        onClick={() => {
-                          setToolsOpen(false);
-                          setSurfaceMenu("floor");
-                        }}
-                      />
-                      <ToolItem
-                        icon={<Paintbrush className="h-4 w-4" />}
-                        label="Change wall panel"
-                        onClick={() => {
-                          setToolsOpen(false);
-                          setSurfaceMenu("wall");
-                        }}
-                      />
-                      <ToolItem
-                        icon={
-                          swappingPhoto ? (
-                            <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                          ) : (
-                            <ImagePlus className="h-4 w-4" />
-                          )
-                        }
-                        label="Change room photo"
-                        disabled={swappingPhoto}
-                        onClick={() => {
-                          setToolsOpen(false);
-                          roomPhotoInputRef.current?.click();
-                        }}
-                      />
-                      {roomEdited && (
-                        <ToolItem
-                          icon={<RotateCcw className="h-4 w-4" />}
-                          label="Revert room photo"
-                          onClick={() => {
-                            setToolsOpen(false);
-                            revertRoom();
-                          }}
-                        />
-                      )}
-                      <ToolItem
-                        icon={<Ruler className="h-4 w-4" />}
-                        label="Measurements"
-                        onClick={() => {
-                          setToolsOpen(false);
-                          setMeasureMenuOpen(true);
-                        }}
-                      />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-            }
-          />
-        </div>
+        {/* Below xl the Designer floats over the room: a rail on lg, a dock on
+           phones. From xl it lives in the side panel instead, so this renders
+           only when the panel is not there — mounting it twice would run two
+           conversations at once. */}
+        {!panelMode && (
+          <div className="absolute inset-x-0 bottom-4 z-30 flex flex-col items-center gap-2 px-4 pointer-events-none lg:inset-x-auto lg:right-4 lg:top-20 lg:w-[360px] lg:items-stretch lg:justify-end lg:px-0">
+            {chatEl}
+          </div>
+        )}
 
         {/* Photorealistic render of the composited scene */}
         {project && (
@@ -1626,7 +1656,7 @@ const isWorkSurface = (p: ProductDTO) =>
       {/* Right context panel */}
       <aside className="hidden xl:flex flex-col w-[340px] shrink-0 border-l border-border bg-surface">
         <div className="flex p-1.5 m-3 rounded-xl bg-surface-muted">
-          {(["properties", "calibrate"] as const).map((p) => (
+          {(["designer", "properties"] as const).map((p) => (
             <button
               key={p}
               onClick={() => setPanel(p)}
@@ -1642,101 +1672,32 @@ const isWorkSurface = (p: ProductDTO) =>
                 />
               )}
               <span className="relative z-10 flex items-center justify-center gap-1.5">
-                {p === "properties" ? <Sliders className="h-4 w-4" /> : <Camera className="h-4 w-4" />}
+                {p === "designer" ? <Sparkles className="h-4 w-4" /> : <Sliders className="h-4 w-4" />}
                 {p}
               </span>
             </button>
           ))}
         </div>
 
-        <div className="flex-1 overflow-y-auto px-4 pb-6">
-          {panel === "calibrate" ? (
-            <div className="space-y-5">
-              <p className="text-sm text-muted">
-                Placement is automatic — the room&apos;s depth is detected by AI and
-                furniture seats on the floor with correct perspective. These are
-                optional fine-tuning controls.
-              </p>
-              {/* AI auto-fit — the quickest fix for over/undersized furniture. */}
-              <div className="p-4 rounded-2xl border border-primary/30 bg-primary/5">
-                <div className="flex items-center gap-2 text-sm font-medium mb-1">
-                  <Sparkles className="h-4 w-4 text-primary" /> Auto-fit furniture size
-                </div>
-                <p className="text-xs text-muted mb-3">
-                  Let AI check if your furniture is sized realistically for the room and
-                  correct it.
-                </p>
-                <Button
-                  className="w-full"
-                  onClick={autoFitScale}
-                  disabled={scaleFitBusy || items.length === 0}
-                >
-                  {scaleFitBusy ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" /> Checking…
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="h-4 w-4" /> Auto-fit with AI
-                    </>
-                  )}
-                </Button>
-              </div>
-              <SliderRow
-                label="Field of view"
-                icon={Camera}
-                value={calib.fov}
-                min={35}
-                max={85}
-                step={1}
-                suffix="°"
-                onChange={(v) => applyCalib((c) => ({ ...c, fov: v }))}
-              />
-              <SliderRow
-                label="Camera height"
-                icon={Camera}
-                value={Math.round(calib.cameraHeightM * 100)}
-                min={60}
-                max={220}
-                step={5}
-                suffix="cm"
-                onChange={(v) => applyCalib((c) => ({ ...c, cameraHeightM: v / 100 }))}
-              />
-              <SliderRow
-                label="Eye level"
-                icon={Maximize2}
-                value={Math.round(calib.horizonY * 100)}
-                min={15}
-                max={85}
-                step={1}
-                suffix="%"
-                onChange={(v) => applyCalib((c) => ({ ...c, horizonY: v / 100 }))}
-              />
-              <SliderRow
-                label="Ceiling height"
-                icon={Maximize2}
-                value={Math.round(calib.ceilingHeightM * 100)}
-                min={200}
-                max={500}
-                step={5}
-                suffix="cm"
-                onChange={(v) => applyCalib((c) => ({ ...c, ceilingHeightM: v / 100 }))}
-              />
-              <SliderRow
-                label="Furniture size"
-                icon={Box}
-                value={Math.round(calib.scale * 100)}
-                min={40}
-                max={200}
-                step={5}
-                suffix="%"
-                onChange={(v) => applyCalib((c) => ({ ...c, scale: v / 100 }))}
-              />
-              <Button variant="secondary" className="w-full" onClick={() => applyCalib(() => DEFAULT_CALIB)}>
-                Reset calibration
-              </Button>
-            </div>
-          ) : selected ? (
+        {/* Both tabs stay MOUNTED and are toggled with CSS. Rendering them
+            conditionally tore the Designer down whenever you glanced at
+            Properties — losing the conversation, and killing a design run that
+            takes the better part of a minute. */}
+        <div
+          className={cn(
+            "flex-1 min-h-0 flex flex-col px-3 pb-3",
+            panel !== "designer" && "hidden",
+          )}
+        >
+          {chatEl}
+        </div>
+        <div
+          className={cn(
+            "flex-1 overflow-y-auto px-4 pb-6",
+            panel !== "properties" && "hidden",
+          )}
+        >
+            {selected ? (
               <div className="space-y-5">
                 <div className="relative aspect-[4/3] rounded-2xl overflow-hidden border border-border">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1842,7 +1803,102 @@ const isWorkSurface = (p: ProductDTO) =>
                   Tap a piece in the room to edit it, or add one from the dock.
                 </p>
               </div>
-          )}
+            )}
+
+            {/* Calibration: fine-tuning that is rarely touched, so it sits at the
+                bottom of Properties instead of costing a whole tab. */}
+            <details className="mt-6 border-t border-border pt-4">
+              <summary className="cursor-pointer list-none flex items-center gap-2 text-sm font-medium text-muted hover:text-foreground">
+                <Camera className="h-4 w-4" /> Camera &amp; scale
+              </summary>
+              <div className="mt-4">
+            <div className="space-y-5">
+              <p className="text-sm text-muted">
+                Placement is automatic — the room&apos;s depth is detected by AI and
+                furniture seats on the floor with correct perspective. These are
+                optional fine-tuning controls.
+              </p>
+              {/* AI auto-fit — the quickest fix for over/undersized furniture. */}
+              <div className="p-4 rounded-2xl border border-primary/30 bg-primary/5">
+                <div className="flex items-center gap-2 text-sm font-medium mb-1">
+                  <Sparkles className="h-4 w-4 text-primary" /> Auto-fit furniture size
+                </div>
+                <p className="text-xs text-muted mb-3">
+                  Let AI check if your furniture is sized realistically for the room and
+                  correct it.
+                </p>
+                <Button
+                  className="w-full"
+                  onClick={autoFitScale}
+                  disabled={scaleFitBusy || items.length === 0}
+                >
+                  {scaleFitBusy ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" /> Checking…
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4" /> Auto-fit with AI
+                    </>
+                  )}
+                </Button>
+              </div>
+              <SliderRow
+                label="Field of view"
+                icon={Camera}
+                value={calib.fov}
+                min={35}
+                max={85}
+                step={1}
+                suffix="°"
+                onChange={(v) => applyCalib((c) => ({ ...c, fov: v }))}
+              />
+              <SliderRow
+                label="Camera height"
+                icon={Camera}
+                value={Math.round(calib.cameraHeightM * 100)}
+                min={60}
+                max={220}
+                step={5}
+                suffix="cm"
+                onChange={(v) => applyCalib((c) => ({ ...c, cameraHeightM: v / 100 }))}
+              />
+              <SliderRow
+                label="Eye level"
+                icon={Maximize2}
+                value={Math.round(calib.horizonY * 100)}
+                min={15}
+                max={85}
+                step={1}
+                suffix="%"
+                onChange={(v) => applyCalib((c) => ({ ...c, horizonY: v / 100 }))}
+              />
+              <SliderRow
+                label="Ceiling height"
+                icon={Maximize2}
+                value={Math.round(calib.ceilingHeightM * 100)}
+                min={200}
+                max={500}
+                step={5}
+                suffix="cm"
+                onChange={(v) => applyCalib((c) => ({ ...c, ceilingHeightM: v / 100 }))}
+              />
+              <SliderRow
+                label="Furniture size"
+                icon={Box}
+                value={Math.round(calib.scale * 100)}
+                min={40}
+                max={200}
+                step={5}
+                suffix="%"
+                onChange={(v) => applyCalib((c) => ({ ...c, scale: v / 100 }))}
+              />
+              <Button variant="secondary" className="w-full" onClick={() => applyCalib(() => DEFAULT_CALIB)}>
+                Reset calibration
+              </Button>
+            </div>
+              </div>
+            </details>
         </div>
       </aside>
 
