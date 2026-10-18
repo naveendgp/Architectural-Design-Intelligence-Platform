@@ -177,14 +177,22 @@ export function StudioChat({
 
   const idRef = useRef(0);
 
-  /* Match the box to the text on every keystroke: collapse to measure, then
-     grow to the content up to the cap, after which it scrolls. */
+  /* Match the box to the text: collapse to measure, then grow to the content up
+     to the cap, after which it scrolls. It re-fits on layout changes too, not
+     just on typing — the height is in pixels, so one measured while the
+     composer was narrow stuck at 84px for an empty field once the box got
+     wider. */
   useEffect(() => {
     const el = taRef.current;
     if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_PX)}px`;
-  }, [input]);
+    const fit = () => {
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_PX)}px`;
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [input, inPanel, railed]);
   const nextId = () => ++idRef.current;
 
   // Mirror of the analysis counter so an async flow can await the next one.
@@ -797,14 +805,31 @@ export function StudioChat({
         </div>
       )}
 
-      {/* The prompt bar itself — the widest, most prominent control on screen */}
-      <div className={cn("pointer-events-auto", inPanel ? "w-full" : "w-[min(780px,100%)] lg:w-full")}>
-        <div className="flex items-end gap-2 pl-3 pr-2 py-2 rounded-[20px] bg-surface/95 backdrop-blur-2xl border border-border shadow-[var(--shadow-lg)] focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10 transition-all">
-          <span className="grid place-items-center h-8 w-8 rounded-full brand-gradient text-white shrink-0">
-            <Sparkles className="h-4 w-4" />  
-          </span>
+      {/* The composer.
 
-          {tools}
+          In a 340px panel the single-row arrangement put five controls on one
+          line and left the text about 200px — the placeholder wrapped onto two
+          lines and there was visibly nowhere to type. So in the panel the text
+          gets a row of its own at full width and the controls sit beneath it,
+          which is how a composer for real writing is shaped. The floating bar
+          keeps its single row, where width is not scarce. */}
+      <div className={cn("pointer-events-auto", inPanel ? "w-full" : "w-[min(780px,100%)] lg:w-full")}>
+        <div
+          className={cn(
+            "bg-surface/95 backdrop-blur-2xl border border-border transition-all",
+            "focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10",
+            inPanel
+              ? "rounded-2xl p-2 shadow-[var(--shadow-sm)]"
+              : "flex items-end gap-2 pl-3 pr-2 py-2 rounded-[20px] shadow-[var(--shadow-lg)]",
+          )}
+        >
+          {!inPanel && (
+            <span className="grid place-items-center h-8 w-8 rounded-full brand-gradient text-white shrink-0">
+              <Sparkles className="h-4 w-4" />
+            </span>
+          )}
+
+          {!inPanel && tools}
 
           <textarea
             ref={taRef}
@@ -822,19 +847,22 @@ export function StudioChat({
             placeholder={
               busy
                 ? busyLabel ?? "Working…"
-                : railed
+                : inPanel
                   ? "Describe the space you want…"
-                  : "Describe the space you want - I'll design it from the marketplace"
+                  : railed
+                    ? "Describe the space you want…"
+                    : "Describe the space you want - I'll design it from the marketplace"
             }
             aria-label="Message"
-            className="flex-1 resize-none bg-transparent py-2 outline-none text-sm placeholder:text-subtle disabled:opacity-60 overflow-y-auto leading-relaxed"
+            className={cn(
+              "resize-none bg-transparent outline-none text-sm placeholder:text-subtle disabled:opacity-60 overflow-y-auto leading-relaxed",
+              inPanel ? "w-full px-2 pt-1.5 pb-1" : "flex-1 py-2",
+            )}
             style={{ maxHeight: COMPOSER_MAX_PX }}
           />
 
-          {/* Only on the narrow dock, where the conversation is hidden behind it.
-              In the rail the conversation is already on screen, and this pill was
-              squeezing a 360px composer down to "Describe the". */}
-          {!empty && !expanded && !railed && (
+          {/* Only on the narrow dock, where the conversation is hidden behind it. */}
+          {!inPanel && !empty && !expanded && !railed && (
             <button
               onClick={() => setExpanded(true)}
               className="h-9 px-3 rounded-xl text-xs font-medium text-muted hover:bg-surface-muted transition-colors shrink-0"
@@ -843,14 +871,35 @@ export function StudioChat({
             </button>
           )}
 
-          <button
-            aria-label="Send"
-            onClick={() => send(input)}
-            disabled={!input.trim() || busy}
-            className="grid place-items-center h-10 w-10 rounded-2xl brand-gradient text-white shadow-[var(--shadow-glow)] disabled:opacity-40 disabled:shadow-none transition-all shrink-0 active:scale-95"
-          >
-            <ArrowUp className="h-5 w-5" />
-          </button>
+          {inPanel ? (
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <div className="flex items-center">{tools}</div>
+              <div className="flex items-center gap-2">
+                {input.trim() && (
+                  <span className="text-[11px] text-subtle hidden sm:block">
+                    Shift + Enter for a new line
+                  </span>
+                )}
+                <button
+                  aria-label="Send"
+                  onClick={() => send(input)}
+                  disabled={!input.trim() || busy}
+                  className="grid place-items-center h-9 w-9 rounded-xl brand-gradient text-white shadow-[var(--shadow-glow)] disabled:opacity-40 disabled:shadow-none transition-all shrink-0 active:scale-95"
+                >
+                  <ArrowUp className="h-[18px] w-[18px]" />
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              aria-label="Send"
+              onClick={() => send(input)}
+              disabled={!input.trim() || busy}
+              className="grid place-items-center h-10 w-10 rounded-2xl brand-gradient text-white shadow-[var(--shadow-glow)] disabled:opacity-40 disabled:shadow-none transition-all shrink-0 active:scale-95"
+            >
+              <ArrowUp className="h-5 w-5" />
+            </button>
+          )}
         </div>
       </div>
     </div>
