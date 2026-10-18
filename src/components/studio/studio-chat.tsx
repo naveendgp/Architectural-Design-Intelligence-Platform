@@ -33,7 +33,11 @@ export type Plan = {
 
 /** A yes/no (or pick-one) prompt rendered as buttons, so the user never has to
     guess the wording. Used to confirm changes that replace the room photo. */
-type Action = { label: string; primary?: boolean; run: () => void };
+/* `hint` is the one line explaining the choice. It lives on the action rather
+   than in the message text because listing the options in prose AND as buttons
+   printed every description twice, which is what turned a simple "pick a
+   direction" into a paragraph nobody could read. */
+type Action = { label: string; hint?: string; primary?: boolean; run: () => void };
 
 type Msg = {
   id: number;
@@ -511,12 +515,11 @@ export function StudioChat({
         {
           id: msgId,
           role: "ai",
-          text: `${plan.reply}\n\nLet's finish the room first — I'll choose the furniture afterwards, once I can see how much space it leaves. Which direction do you want?\n\n${options
-            .map((o) => `· ${o.label} — ${o.reason || o.instruction}`)
-            .join("\n")}`,
+          text: "Let's finish the room first, then I'll furnish what's left. Pick a direction:",
           actions: [
             ...options.map((o, i) => ({
               label: o.label,
+              hint: o.reason || o.instruction,
               primary: i === 0,
               run: () => {
                 setMessages((mm) =>
@@ -527,6 +530,7 @@ export function StudioChat({
             })),
             {
               label: "Keep the room as it is",
+              hint: "Go straight to furniture",
               run: () => {
                 setMessages((mm) =>
                   mm.map((x) =>
@@ -777,14 +781,19 @@ export function StudioChat({
             placeholder={
               busy
                 ? busyLabel ?? "Working…"
-                : "Describe the space you want - I'll design it from the marketplace"
+                : railed
+                  ? "Describe the space you want…"
+                  : "Describe the space you want - I'll design it from the marketplace"
             }
             aria-label="Message"
             className="flex-1 resize-none bg-transparent py-2 outline-none text-sm placeholder:text-subtle disabled:opacity-60 overflow-y-auto leading-relaxed"
             style={{ maxHeight: COMPOSER_MAX_PX }}
           />
 
-          {!empty && !expanded && (
+          {/* Only on the narrow dock, where the conversation is hidden behind it.
+              In the rail the conversation is already on screen, and this pill was
+              squeezing a 360px composer down to "Describe the". */}
+          {!empty && !expanded && !railed && (
             <button
               onClick={() => setExpanded(true)}
               className="h-9 px-3 rounded-xl text-xs font-medium text-muted hover:bg-surface-muted transition-colors shrink-0"
@@ -929,20 +938,33 @@ function Bubble({
 
         {/* Confirmations answer with a click, never by typing the right words. */}
         {msg.actions && msg.actions.length > 0 && (
-          <div className="mt-2.5 flex flex-wrap gap-1.5">
+          <div className="mt-2.5 flex flex-col gap-1.5">
             {msg.actions.map((a) => (
               <button
                 key={a.label}
                 onClick={a.run}
                 disabled={busy}
                 className={cn(
-                  "h-9 px-4 rounded-xl text-[13px] font-semibold transition-all active:scale-[0.98] disabled:opacity-50",
+                  "w-full text-left rounded-xl transition-all active:scale-[0.99] disabled:opacity-50",
+                  a.hint ? "px-3.5 py-2.5" : "h-9 px-4 grid place-items-center",
                   a.primary
-                    ? "brand-gradient text-white shadow-[var(--shadow-glow)]"
+                    ? "border border-primary/40 bg-primary/5 hover:bg-primary/10"
                     : "border border-border bg-surface hover:bg-surface-muted",
                 )}
               >
-                {a.label}
+                <span className="flex items-center gap-2">
+                  <span className="text-[13px] font-semibold tracking-tight">{a.label}</span>
+                  {a.primary && (
+                    <span className="text-[10px] font-medium text-primary uppercase tracking-wide">
+                      Suggested
+                    </span>
+                  )}
+                </span>
+                {a.hint && (
+                  <span className="mt-0.5 block text-[12px] leading-snug text-muted line-clamp-2">
+                    {a.hint}
+                  </span>
+                )}
               </button>
             ))}
           </div>

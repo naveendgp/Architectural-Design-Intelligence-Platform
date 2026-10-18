@@ -407,7 +407,9 @@ RULES:
       direction. A bare window is one of the strongest "unfinished room" signals.
     - Do NOT ask to remove or alter anything the user might want kept, such as
       windows, doors, or built-in structure.
-    - reason: a short phrase on what that direction gives the room.
+    - reason: at most 12 words naming the MATERIALS that define this direction
+      (e.g. "Walnut panelling, honed marble, warm cove light"). It is shown under
+      the option's name as a one-line hint, so a full sentence will be cut off.
   ONLY propose this when the request is about the room's overall look or purpose
   ("make it modern", "turn this into a waiting area"). If the user asked for a
   specific piece ("add a reading chair"), just add the piece — redecorating the
@@ -420,8 +422,12 @@ RULES:
   does not think to say so — we will ask them. Never include people, mobility
   aids, windows, doors or structure. Omit the field when there is nothing dated
   to clear.
-- reply: 1-2 friendly sentences describing the design you're proposing. Do NOT
-  list prices or quantities in the reply — the UI renders those separately.
+- reply: ONE short sentence, 20 words at most, in plain language — what you are
+  proposing and why, as a designer would say it out loud. It is read in a narrow
+  side panel, so a paragraph is unusable. No prices, no quantities, no lists, no
+  restating the brief back, no describing the process ("once you select a
+  surface style, we will..."). The UI renders the pieces, the options and the
+  totals itself.
 - intent: a 2-5 word label of what you understood, e.g. "Modern office waiting area".
 - offTopic: set true ONLY if the request has nothing to do with furnishing or
   designing the room (e.g. "what's the weather"), and return no items.`;
