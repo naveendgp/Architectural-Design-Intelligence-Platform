@@ -704,6 +704,24 @@ function Studio() {
      local `working` copy through the loop so each piece is placed against the ones
      before it, and we spend a single Gemini call for the whole batch (its candidate
      spots seed the search; geometry does the separating). */
+/* A seat that belongs AT a work surface rather than loose on the floor. The
+   difference matters: an executive chair seated by free-space search ended up
+   2m in front of the desk it belongs to, which perspective then drew at 46% of
+   the frame — read by everyone as "the model is scaled wrong" when it was
+   really standing next to the camera. */
+const isDeskSeat = (p: ProductDTO) =>
+  /chair|stool/i.test(p.category + " " + p.name) &&
+  /executive|task|office|desk|mesh|ergo|swivel|study/i.test(p.name);
+
+/* Something a chair can actually be pulled up to. The name alone isn't enough:
+   it matched a 45cm C-table and, worse, the "Dome Marble Table Lamp". Size and
+   category settle it — a work surface is wide, and never a light fitting. */
+const isWorkSurface = (p: ProductDTO) =>
+  /desk|table/i.test(p.name) &&
+  !/side|coffee|drum|console|bedside|lamp/i.test(p.name) &&
+  p.category !== "Lighting" &&
+  (p.widthCm ?? 0) >= 100;
+
   const addFurnitureBatch = useCallback(
     async (entries: { productId: string; qty: number }[]) => {
       if (!projectId) return { added: 0, skipped: [] as string[] };
@@ -762,9 +780,36 @@ function Studio() {
       let added = 0;
       let floorIndex = 0;
 
+      /* Auto-placement avoids the nearest slice of floor. It is real floor and a
+         user may still drag a piece there, but anything the ENGINE seats within
+         arm's reach of the lens fills the frame and hides the room behind it —
+         which is what made a 116cm chair look mis-scaled next to a 75cm desk. */
+      const fullFloor = floorRegion();
+      const autoFloor = {
+        ...fullFloor,
+        maxY: fullFloor.minY + (fullFloor.maxY - fullFloor.minY) * 0.82,
+      };
+
+      // Anchors seated in this batch, so a companion piece can be put beside the
+      // thing it belongs to instead of wherever there happens to be a gap.
+      const seatedAt = new Map<string, { ax: number; ay: number }>();
+
+      /* The desk a seat should be tucked into: one placed earlier in this batch
+         if there is one, otherwise one already standing in the room. */
+      const findDeskAnchor = (): { ax: number; ay: number } | null => {
+        for (const [pid, at] of seatedAt) {
+          const prod = products.find((x) => x.id === pid);
+          if (prod && isWorkSurface(prod)) return at;
+        }
+        const standing = working.find(
+          (it) => it.product.mount !== "ceiling" && isWorkSurface(it.product),
+        );
+        return standing ? itemAnchor(standing) : null;
+      };
+
       for (const product of queue) {
         const ceiling = product.mount === "ceiling";
-        const region = ceiling ? CEILING_ANCHOR_BAND : floorRegion();
+        const region = ceiling ? CEILING_ANCHOR_BAND : autoFloor;
         const samePlane = working.filter((it) => (it.product.mount === "ceiling") === ceiling);
         const spec: FootprintSpec = {
           widthCm: product.widthCm,
@@ -781,10 +826,18 @@ function Studio() {
         if (ceiling) {
           const n = samePlane.length;
           start = ceilingAnchor(n === 0 ? 0.5 : 0.5 + (n % 2 === 1 ? 0.18 : -0.18) * Math.ceil(n / 2), CEILING_FALLBACK.posZ);
+        } else if (isDeskSeat(product) && findDeskAnchor()) {
+          /* Tuck it in at the work surface, a little nearer the camera, turned to
+             face it (180° = front toward the back of the room). findFreeAnchor
+             nudges from here to the closest clear spot, so it lands AT the desk
+             rather than across the room from it. */
+          const desk = findDeskAnchor()!;
+          start = { ax: desk.ax, ay: Math.min(autoFloor.maxY, desk.ay + 0.05) };
+          facing = 180;
         } else if (seeds.length) {
           const seed = seeds[floorIndex % seeds.length];
           floorIndex++;
-          start = { ax: seed.ax, ay: Math.min(0.94, Math.max(0.55, seed.ay)) };
+          start = { ax: seed.ax, ay: Math.min(autoFloor.maxY, Math.max(autoFloor.minY, seed.ay)) };
           facing = seed.facingDeg;
         } else {
           start = { ax: FLOOR_FALLBACK.posX, ay: FLOOR_FALLBACK.posZ };
@@ -793,6 +846,14 @@ function Studio() {
         const free =
           findFreeAnchor(start.ax, start.ay, spec, samePlane, aspect, calib, depth, region, obstacles) ??
           findFreeAnchor(start.ax, start.ay, spec, samePlane, aspect, calib, depth, region, []);
+
+        /* Turn a desk seat to face its desk based on where it actually SETTLED.
+           The search can push it to the far side of the surface, and a fixed
+           180° then had it facing the back wall with the desk behind it. */
+        if (free && !ceiling && isDeskSeat(product)) {
+          const desk = findDeskAnchor();
+          if (desk) facing = free.ay < desk.ay ? 0 : 180;
+        }
         if (!free) {
           // Genuinely no clear space left on this plane — report instead of stacking.
           if (!skipped.includes(product.name)) skipped.push(product.name);
@@ -807,6 +868,7 @@ function Studio() {
         const patch = { posX: pos.ax, posZ: pos.ay, rotationY: ceiling ? 0 : facing, scale: DEFAULT_SCALE };
         const seated = { ...placement, ...patch };
         working = [...working, seated];
+        seatedAt.set(product.id, { ax: pos.ax, ay: pos.ay });
         added++;
         setItems((prev) => [...prev, seated]);
         api.updatePlacement(seated.id, patch).catch(() => {});
