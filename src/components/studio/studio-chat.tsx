@@ -150,6 +150,19 @@ export function StudioChat({
   /* The composer grows with the prompt. It was a one-row textarea with no
      resize, so a paragraph-long brief — the kind this bar is FOR — scrolled
      inside a single visible line and you couldn't read back what you'd typed. */
+  /* Whether the chat is living in the right-hand rail (lg+). Layout is handled
+     in CSS; this is only for BEHAVIOUR that genuinely differs — in the rail the
+     conversation sits beside the room rather than over it, so the reflex to get
+     out of the way no longer applies. */
+  const [railed, setRailed] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const sync = () => setRailed(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
   const taRef = useRef<HTMLTextAreaElement>(null);
   const COMPOSER_MAX_PX = 168; // ~7 lines, then it scrolls
 
@@ -624,9 +637,11 @@ export function StudioChat({
         : `Placed all ${added} pieces, spaced around the room. Drag anything to fine-tune, or hit Render Scene to see it photoreal.`;
 
       setMessages((m) => [...m, { id: nextId(), role: "ai", text: placedText }]);
-      /* The furniture is in — the room is the thing worth looking at now, and the
-         panel covers it. Collapse after a beat so the message is still readable. */
-      setTimeout(() => setExpanded(false), 2600);
+      /* The furniture is in — on a narrow screen the room is the thing worth
+         looking at now and the panel covers it, so collapse after a beat, late
+         enough to read the message. In the rail nothing is covered, so closing
+         the conversation would just destroy the history for no reason. */
+      if (!railed) setTimeout(() => setExpanded(false), 2600);
     } finally {
       setBusy(false);
       setBusyLabel(undefined);
@@ -653,7 +668,7 @@ export function StudioChat({
     /* The studio's primary control. Positioning is owned by the page's bottom
        cluster so the manual tool dock stacks above this instead of overlapping
        it; here we only lay out conversation → suggestions → prompt bar. */
-    <div className="w-full flex flex-col items-center gap-2 pointer-events-none">
+    <div className="w-full flex flex-col items-center gap-2 pointer-events-none lg:h-full lg:items-stretch lg:justify-end lg:min-h-0">
       {/* Conversation — only once there is something to show */}
       <AnimatePresence>
         {expanded && !empty && (
@@ -662,7 +677,7 @@ export function StudioChat({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 12, scale: 0.98 }}
             transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-            className="pointer-events-auto w-[min(780px,100%)] rounded-[22px] bg-surface/95 backdrop-blur-2xl border border-border shadow-2xl overflow-hidden"
+            className="pointer-events-auto w-[min(780px,100%)] rounded-[22px] bg-surface/95 backdrop-blur-2xl border border-border shadow-2xl overflow-hidden lg:w-full lg:flex-1 lg:min-h-0 lg:flex lg:flex-col"
           >
             <div className="flex items-center gap-2.5 px-4 h-12 border-b border-border/70 shrink-0">
               <span className="grid place-items-center h-7 w-7 rounded-full brand-gradient text-white shrink-0">
@@ -698,7 +713,7 @@ export function StudioChat({
               </button>
             </div>
 
-            <div className="max-h-[min(46vh,440px)] overflow-y-auto px-4 py-4 space-y-4">
+            <div className="max-h-[min(46vh,440px)] overflow-y-auto px-4 py-4 space-y-4 lg:max-h-none lg:flex-1 lg:min-h-0">
               {messages.map((m) => (
                 <Bubble
                   key={m.id}
@@ -723,7 +738,7 @@ export function StudioChat({
       {/* Openers — only while the room is still empty and nothing has been asked,
           so they stop competing with the room once work is under way. */}
       {empty && roomEmpty && suggestions.length > 0 && (
-        <div className="pointer-events-auto w-[min(780px,100%)] flex flex-wrap justify-center gap-1.5">
+        <div className="pointer-events-auto w-[min(780px,100%)] flex flex-wrap justify-center gap-1.5 lg:w-full lg:justify-start">
           {suggestions.map((s) => (
             <button
               key={s.label}
@@ -738,7 +753,7 @@ export function StudioChat({
       )}
 
       {/* The prompt bar itself — the widest, most prominent control on screen */}
-      <div className="pointer-events-auto w-[min(780px,100%)]">
+      <div className="pointer-events-auto w-[min(780px,100%)] lg:w-full">
         <div className="flex items-end gap-2 pl-3 pr-2 py-2 rounded-[20px] bg-surface/95 backdrop-blur-2xl border border-border shadow-[var(--shadow-lg)] focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10 transition-all">
           <span className="grid place-items-center h-8 w-8 rounded-full brand-gradient text-white shrink-0">
             <Sparkles className="h-4 w-4" />  

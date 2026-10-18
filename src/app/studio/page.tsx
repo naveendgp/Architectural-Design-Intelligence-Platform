@@ -1213,9 +1213,21 @@ function Studio() {
           }}
         />
 
-        {/* Bottom cluster — ONE row, so the room stays the hero. The AI bar is the
-            only permanent control; the manual tools live behind its "+" menu. */}
-        <div className="absolute inset-x-0 bottom-4 z-30 flex flex-col items-center gap-2 px-4 pointer-events-none">
+        {/* The AI Designer's home.
+
+            Narrow screens: a bottom cluster, one row, so the room stays the hero.
+            Wide screens: a right-hand rail, so you can read the room while you
+            describe it — the conversation used to sit on top of the thing you
+            were describing.
+
+            The rail OVERLAYS; it never resizes the stage. Anchors are normalised
+            to the stage box and the photo is object-cover, so narrowing the stage
+            would re-crop the photo and shift every piece of furniture off the
+            room it was placed against. It starts below the top bar so it doesn't
+            collide with Render Scene. No offset is needed for the properties
+            panel: that is a sibling column, so this container already ends where
+            it begins and the rail lands right beside it. */}
+        <div className="absolute inset-x-0 bottom-4 z-30 flex flex-col items-center gap-2 px-4 pointer-events-none lg:inset-x-auto lg:right-4 lg:top-20 lg:w-[360px] lg:items-stretch lg:justify-end lg:px-0">
           <StudioChat
             products={products}
             onAdd={addFurniture}
