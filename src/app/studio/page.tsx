@@ -716,6 +716,17 @@ const isDeskSeat = (p: ProductDTO) =>
 /* Something a chair can actually be pulled up to. The name alone isn't enough:
    it matched a 45cm C-table and, worse, the "Dome Marble Table Lamp". Size and
    category settle it — a work surface is wide, and never a light fitting. */
+/* The piece a room is built around — a desk, sofa, bed, or a wall of storage.
+   These belong ALONG A WALL, which in this projection means seated just inside
+   the far floor line, square to it. Dropped at a free spot mid-floor they read
+   as adrift, and everything arranged around them inherits the mistake. */
+const isAnchorPiece = (p: ProductDTO) =>
+  p.mount !== "ceiling" &&
+  (p.widthCm ?? 0) >= 150 &&
+  /desk|table|sofa|bed|console|sideboard|cabinet|wardrobe|storage|unit|shelf/i.test(
+    p.name + " " + p.category,
+  );
+
 const isWorkSurface = (p: ProductDTO) =>
   /desk|table/i.test(p.name) &&
   !/side|coffee|drum|console|bedside|lamp/i.test(p.name) &&
@@ -809,7 +820,8 @@ const isWorkSurface = (p: ProductDTO) =>
 
       for (const product of queue) {
         const ceiling = product.mount === "ceiling";
-        const region = ceiling ? CEILING_ANCHOR_BAND : autoFloor;
+        // Most pieces search the whole auto band; a desk seat narrows it below.
+        let seatRegion = autoFloor;
         const samePlane = working.filter((it) => (it.product.mount === "ceiling") === ceiling);
         const spec: FootprintSpec = {
           widthCm: product.widthCm,
@@ -827,13 +839,26 @@ const isWorkSurface = (p: ProductDTO) =>
           const n = samePlane.length;
           start = ceilingAnchor(n === 0 ? 0.5 : 0.5 + (n % 2 === 1 ? 0.18 : -0.18) * Math.ceil(n / 2), CEILING_FALLBACK.posZ);
         } else if (isDeskSeat(product) && findDeskAnchor()) {
-          /* Tuck it in at the work surface, a little nearer the camera, turned to
-             face it (180° = front toward the back of the room). findFreeAnchor
-             nudges from here to the closest clear spot, so it lands AT the desk
-             rather than across the room from it. */
+          /* You sit BEHIND a desk, not in front of it. "Behind" here means
+             further from the camera — a smaller ay — so the search is capped at
+             the desk's own line and cannot put the chair in the foreground,
+             which is where it was landing and why it dwarfed everything. The
+             chair then faces the camera (0°), i.e. across the desk. */
           const desk = findDeskAnchor()!;
-          start = { ax: desk.ax, ay: Math.min(autoFloor.maxY, desk.ay + 0.05) };
-          facing = 180;
+          const behind = { ...autoFloor, maxY: desk.ay - 0.01 };
+          /* If the desk is already hard against the wall there is no band left
+             behind it. Seat the chair in the open rather than dropping it —
+             a chair on the wrong side still beats "didn't fit". */
+          if (behind.maxY - behind.minY >= 0.03) seatRegion = behind;
+          start = { ax: desk.ax, ay: Math.max(seatRegion.minY, desk.ay - 0.06) };
+          facing = 0;
+        } else if (isAnchorPiece(product)) {
+          /* Against the far wall, square to it, and nudged off-centre only to
+             clear whatever is already there. */
+          const alongWall = autoFloor.minY + 0.03;
+          const n = working.filter((it) => it.product.mount !== "ceiling").length;
+          start = { ax: 0.5 + (n % 2 === 1 ? 0.2 : -0.2) * Math.ceil(n / 2), ay: alongWall };
+          facing = 0;
         } else if (seeds.length) {
           const seed = seeds[floorIndex % seeds.length];
           floorIndex++;
@@ -843,17 +868,12 @@ const isWorkSurface = (p: ProductDTO) =>
           start = { ax: FLOOR_FALLBACK.posX, ay: FLOOR_FALLBACK.posZ };
         }
 
+        const region = ceiling ? CEILING_ANCHOR_BAND : seatRegion;
         const free =
           findFreeAnchor(start.ax, start.ay, spec, samePlane, aspect, calib, depth, region, obstacles) ??
           findFreeAnchor(start.ax, start.ay, spec, samePlane, aspect, calib, depth, region, []);
 
-        /* Turn a desk seat to face its desk based on where it actually SETTLED.
-           The search can push it to the far side of the surface, and a fixed
-           180° then had it facing the back wall with the desk behind it. */
-        if (free && !ceiling && isDeskSeat(product)) {
-          const desk = findDeskAnchor();
-          if (desk) facing = free.ay < desk.ay ? 0 : 180;
-        }
+
         if (!free) {
           // Genuinely no clear space left on this plane — report instead of stacking.
           if (!skipped.includes(product.name)) skipped.push(product.name);
