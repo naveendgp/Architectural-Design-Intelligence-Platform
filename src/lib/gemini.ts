@@ -197,6 +197,8 @@ export type CatalogEntry = {
   id: string;
   name: string;
   category: string;
+  /** Machine-facing function labels — role:*, room:*, place:*, pairs:*. */
+  aiTags?: string[];
   styleTags: string[];
   priceInr: number;
   widthCm: number | null;
@@ -262,7 +264,8 @@ export async function designPlan(
         .filter(Boolean)
         .join("×");
       const styles = p.styleTags.length ? ` [${p.styleTags.join("/")}]` : "";
-      return `- id=${p.id} | "${p.name}" | ${p.category} | ${p.mount}-mounted | ₹${p.priceInr}${dims ? ` | ${dims}cm` : ""}${styles}`;
+      const fn = p.aiTags?.length ? ` | ${p.aiTags.join(" ")}` : "";
+      return `- id=${p.id} | "${p.name}" | ${p.category} | ${p.mount}-mounted | ₹${p.priceInr}${dims ? ` | ${dims}cm` : ""}${styles}${fn}`;
     })
     .join("\n");
 
@@ -307,7 +310,21 @@ ${placedList}
 
 ${capacityBlock}
 
-THE CATALOG — you may ONLY choose from these, using the exact id string:
+THE CATALOG — you may ONLY choose from these, using the exact id string.
+Each line ends with FUNCTION LABELS that say what the piece actually is. Trust
+them over the product name, which is marketing:
+  role:*   what it is for — role:desk and role:meeting-table and
+           role:dining-table are all "tables" by name but are NOT
+           interchangeable; nor are role:task-chair, role:dining-chair and
+           role:lounge-chair.
+  room:*   the room it belongs in. Do not put role:bed or room:bedroom pieces
+           in an office, or office pieces in a bedroom.
+  place:*  how it is meant to sit — wall, free, beside-seating, on-surface
+           (it goes ON a desk or table, never on the floor), ceiling.
+  pairs:*  what it belongs with. If you choose a role:desk, choose the
+           role:task-chair that pairs with it; a role:dining-table needs
+           role:dining-chair; a role:table-lamp needs a surface to stand on.
+Match the ROLE to the job first, then style and size:
 ${catalogList}
 
 THE REQUEST: "${request}"

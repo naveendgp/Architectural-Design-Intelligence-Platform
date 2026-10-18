@@ -218,7 +218,14 @@ export function itemWorldPos(
   _depth?: DepthField | null,
 ): THREE.Vector3 {
   const { ax, ay } = itemAnchor(item);
-  return anchorToPoint(ax, ay, aspect, calib, item.product.mount);
+  const p = anchorToPoint(ax, ay, aspect, calib, item.product.mount);
+  /* posY lifts a piece off the floor, in metres. It is how something that
+     belongs ON a surface — a desk lamp — stands at desk height instead of on
+     the carpet beside it. Zero for everything that sits on the floor. */
+  if (item.product.mount !== "ceiling" && Number.isFinite(item.posY) && item.posY > 0) {
+    p.y += item.posY;
+  }
+  return p;
 }
 
 /** World XZ of a raw anchor for a given plane (used for collision boxes). */

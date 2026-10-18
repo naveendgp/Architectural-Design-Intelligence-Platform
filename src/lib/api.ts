@@ -254,7 +254,7 @@ export const api = {
   updatePlacement: (
     id: string,
     patch: Partial<
-      Pick<PlacedItemDTO, "posX" | "posZ" | "rotationY" | "tiltX" | "tiltZ" | "scale">
+      Pick<PlacedItemDTO, "posX" | "posY" | "posZ" | "rotationY" | "tiltX" | "tiltZ" | "scale">
     >,
   ) => send<{ ok: true }>(`/api/placements/${id}`, "PATCH", patch),
   deletePlacement: (id: string) =>

@@ -85,6 +85,13 @@ const MIGRATIONS = [
   "ALTER TABLE Product ADD COLUMN mount TEXT NOT NULL DEFAULT 'floor'",
   // Keeps the pre-edit room photo so AI room edits can be reverted.
   "ALTER TABLE RoomProject ADD COLUMN originalPhotoUrl TEXT",
+  /* Machine-facing labels the shopper never sees: what a piece is FOR, the room
+     it suits, how it wants to be placed, and what it pairs with. Names alone
+     were doing this job and doing it badly — "Conference Table", "Marble
+     Morning Dining Table" and "Urban Walnut C Table" all read as "table", so
+     the designer used a meeting table as a bedside and the placement engine
+     tucked a chair under a lamp called "Dome Marble Table Lamp". */
+  "ALTER TABLE Product ADD COLUMN aiTags TEXT NOT NULL DEFAULT '[]'",
 ];
 
 /** Ensure tables exist + columns are migrated. Runs once per process. */

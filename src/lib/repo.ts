@@ -32,6 +32,14 @@ function toProductDTO(r: Row): ProductDTO {
     description: strOrNull(r.description),
     priceInr: num(r.priceInr),
     styleTags: parseStyles(r.styleTags),
+    aiTags: (() => {
+      try {
+        const v = JSON.parse(String(r.aiTags ?? "[]"));
+        return Array.isArray(v) ? v.map(String) : [];
+      } catch {
+        return [];
+      }
+    })(),
     widthCm: numOrNull(r.widthCm),
     depthCm: numOrNull(r.depthCm),
     heightCm: numOrNull(r.heightCm),
@@ -236,7 +244,7 @@ export async function getProjectScene(id: string): Promise<{
     sql: `SELECT pi.*, pr.id AS p_id, pr.name AS p_name, pr.category AS p_category,
                  pr.description AS p_description, pr.priceInr AS p_priceInr,
                  pr.styleTags AS p_styleTags, pr.widthCm AS p_widthCm, pr.depthCm AS p_depthCm,
-                 pr.heightCm AS p_heightCm, pr.status AS p_status, pr.thumbnailUrl AS p_thumbnailUrl,
+                 pr.heightCm AS p_heightCm, pr.status AS p_status, pr.aiTags AS p_aiTags, pr.thumbnailUrl AS p_thumbnailUrl,
                  pr.modelUrl AS p_modelUrl, pr.frontYaw AS p_frontYaw, pr.mount AS p_mount, pr.createdAt AS p_createdAt
           FROM PlacedItem pi JOIN Product pr ON pr.id = pi.productId
           WHERE pi.projectId = ? ORDER BY pi.createdAt ASC`,
@@ -258,6 +266,7 @@ export async function getProjectScene(id: string): Promise<{
         depthCm: pl.p_depthCm,
         heightCm: pl.p_heightCm,
         status: pl.p_status,
+        aiTags: pl.p_aiTags,
         thumbnailUrl: pl.p_thumbnailUrl,
         modelUrl: pl.p_modelUrl,
         frontYaw: pl.p_frontYaw,
@@ -309,7 +318,7 @@ export async function addPlacement(
     sql: `SELECT pi.*, pr.id AS p_id, pr.name AS p_name, pr.category AS p_category,
                  pr.description AS p_description, pr.priceInr AS p_priceInr,
                  pr.styleTags AS p_styleTags, pr.widthCm AS p_widthCm, pr.depthCm AS p_depthCm,
-                 pr.heightCm AS p_heightCm, pr.status AS p_status, pr.thumbnailUrl AS p_thumbnailUrl,
+                 pr.heightCm AS p_heightCm, pr.status AS p_status, pr.aiTags AS p_aiTags, pr.thumbnailUrl AS p_thumbnailUrl,
                  pr.modelUrl AS p_modelUrl, pr.frontYaw AS p_frontYaw, pr.mount AS p_mount, pr.createdAt AS p_createdAt
           FROM PlacedItem pi JOIN Product pr ON pr.id = pi.productId WHERE pi.id = ?`,
     args: [id],
@@ -323,7 +332,7 @@ export async function addPlacement(
       id: pl.p_id, name: pl.p_name, category: pl.p_category,
       description: pl.p_description, priceInr: pl.p_priceInr, styleTags: pl.p_styleTags,
       widthCm: pl.p_widthCm, depthCm: pl.p_depthCm, heightCm: pl.p_heightCm,
-      status: pl.p_status, thumbnailUrl: pl.p_thumbnailUrl, modelUrl: pl.p_modelUrl,
+      status: pl.p_status, aiTags: pl.p_aiTags, thumbnailUrl: pl.p_thumbnailUrl, modelUrl: pl.p_modelUrl,
       frontYaw: pl.p_frontYaw, mount: pl.p_mount, createdAt: pl.p_createdAt,
     }),
     posX: num(pl.posX), posY: num(pl.posY), posZ: num(pl.posZ),

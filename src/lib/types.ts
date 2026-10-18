@@ -22,6 +22,10 @@ export type ProductDTO = {
      browsed and priced in the marketplace but never placed in a room; attach a
      modelUrl and flip it to READY when the real model lands. */
   status: "PROCESSING" | "READY" | "FAILED" | "PREVIEW";
+  /* Machine-facing labels, never shown to a shopper. See MIGRATIONS in db.ts.
+     Vocabulary: role:* what it is for, room:* where it belongs, place:* how it
+     should be seated, pairs:* what it goes with. */
+  aiTags: string[];
   thumbnailUrl: string;
   modelUrl: string | null;
   frontYaw: number; // yaw (°) that makes the model's front face the camera

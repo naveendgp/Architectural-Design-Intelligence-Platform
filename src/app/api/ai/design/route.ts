@@ -54,6 +54,7 @@ export async function POST(req: Request) {
     name: p.name,
     category: p.category,
     styleTags: p.styleTags,
+    aiTags: p.aiTags,
     priceInr: p.priceInr,
     widthCm: p.widthCm,
     depthCm: p.depthCm,

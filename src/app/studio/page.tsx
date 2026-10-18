@@ -716,34 +716,25 @@ function Studio() {
      local `working` copy through the loop so each piece is placed against the ones
      before it, and we spend a single Gemini call for the whole batch (its candidate
      spots seed the search; geometry does the separating). */
-/* A seat that belongs AT a work surface rather than loose on the floor. The
-   difference matters: an executive chair seated by free-space search ended up
-   2m in front of the desk it belongs to, which perspective then drew at 46% of
-   the frame — read by everyone as "the model is scaled wrong" when it was
-   really standing next to the camera. */
-const isDeskSeat = (p: ProductDTO) =>
-  /chair|stool/i.test(p.category + " " + p.name) &&
-  /executive|task|office|desk|mesh|ergo|swivel|study/i.test(p.name);
+/* Placement reads the catalogue's machine-facing labels instead of guessing
+   from product names. Guessing cost us twice: a 45cm "Urban Walnut C Table"
+   and the "Dome Marble Table Lamp" both passed as desks a chair could be
+   tucked under, because their names contain "Table". */
+const hasTag = (p: ProductDTO, t: string) => (p.aiTags ?? []).includes(t);
 
-/* Something a chair can actually be pulled up to. The name alone isn't enough:
-   it matched a 45cm C-table and, worse, the "Dome Marble Table Lamp". Size and
-   category settle it — a work surface is wide, and never a light fitting. */
-/* The piece a room is built around — a desk, sofa, bed, or a wall of storage.
-   These belong ALONG A WALL, which in this projection means seated just inside
-   the far floor line, square to it. Dropped at a free spot mid-floor they read
-   as adrift, and everything arranged around them inherits the mistake. */
-const isAnchorPiece = (p: ProductDTO) =>
-  p.mount !== "ceiling" &&
-  (p.widthCm ?? 0) >= 150 &&
-  /desk|table|sofa|bed|console|sideboard|cabinet|wardrobe|storage|unit|shelf/i.test(
-    p.name + " " + p.category,
-  );
+/** A seat that belongs pulled up to a work surface. */
+const isDeskSeat = (p: ProductDTO) => hasTag(p, "pairs:desk") && hasTag(p, "role:task-chair");
 
+/** Something a seat can actually be pulled up to. */
 const isWorkSurface = (p: ProductDTO) =>
-  /desk|table/i.test(p.name) &&
-  !/side|coffee|drum|console|bedside|lamp/i.test(p.name) &&
-  p.category !== "Lighting" &&
-  (p.widthCm ?? 0) >= 100;
+  hasTag(p, "role:desk") || hasTag(p, "role:meeting-table") || hasTag(p, "role:dining-table");
+
+/** A piece the room is built around — it belongs along a wall. */
+const isAnchorPiece = (p: ProductDTO) =>
+  p.mount !== "ceiling" && hasTag(p, "place:wall") && (p.widthCm ?? 0) >= 150;
+
+/** Belongs ON a desk or table, so it has no business being seated on the floor. */
+const needsSurface = (p: ProductDTO) => hasTag(p, "place:on-surface");
 
   const addFurnitureBatch = useCallback(
     async (entries: { productId: string; qty: number }[]) => {
@@ -819,6 +810,21 @@ const isWorkSurface = (p: ProductDTO) =>
 
       /* The desk a seat should be tucked into: one placed earlier in this batch
          if there is one, otherwise one already standing in the room. */
+      /* A surface something can STAND on, with its height, so a desk lamp can be
+         put at desk height instead of on the floor beside it. */
+      const findSurface = (): { ax: number; ay: number; topM: number } | null => {
+        for (const [pid, at] of seatedAt) {
+          const prod = products.find((x) => x.id === pid);
+          if (prod && isWorkSurface(prod)) return { ...at, topM: (prod.heightCm ?? 75) / 100 };
+        }
+        const standing = working.find(
+          (it) => it.product.mount !== "ceiling" && isWorkSurface(it.product),
+        );
+        return standing
+          ? { ...itemAnchor(standing), topM: (standing.product.heightCm ?? 75) / 100 }
+          : null;
+      };
+
       const findDeskAnchor = (): { ax: number; ay: number } | null => {
         for (const [pid, at] of seatedAt) {
           const prod = products.find((x) => x.id === pid);
@@ -847,6 +853,7 @@ const isWorkSurface = (p: ProductDTO) =>
         // from the same point; ceiling fixtures spread along the ceiling band.
         let start: { ax: number; ay: number };
         let facing = 0;
+        let liftM = 0; // metres above the floor; non-zero only for on-surface pieces
         if (ceiling) {
           const n = samePlane.length;
           start = ceilingAnchor(n === 0 ? 0.5 : 0.5 + (n % 2 === 1 ? 0.18 : -0.18) * Math.ceil(n / 2), CEILING_FALLBACK.posZ);
@@ -863,6 +870,14 @@ const isWorkSurface = (p: ProductDTO) =>
              a chair on the wrong side still beats "didn't fit". */
           if (behind.maxY - behind.minY >= 0.03) seatRegion = behind;
           start = { ax: desk.ax, ay: Math.max(seatRegion.minY, desk.ay - 0.06) };
+          facing = 0;
+        } else if (needsSurface(product) && findSurface()) {
+          /* Stand it ON the surface: same spot on the floor plan, lifted to the
+             surface's height. Without this a desk lamp was seated like
+             furniture and ended up standing on the carpet. */
+          const surf = findSurface()!;
+          start = { ax: Math.min(0.96, surf.ax + 0.08), ay: surf.ay };
+          liftM = surf.topM;
           facing = 0;
         } else if (isAnchorPiece(product)) {
           /* Against the far wall, square to it, and nudged off-centre only to
@@ -897,7 +912,13 @@ const isWorkSurface = (p: ProductDTO) =>
         const pos = ceiling
           ? ceilingAnchor(free.ax, free.ay)
           : { ax: clampAnchor(free.ax), ay: clampAnchor(free.ay) };
-        const patch = { posX: pos.ax, posZ: pos.ay, rotationY: ceiling ? 0 : facing, scale: DEFAULT_SCALE };
+        const patch = {
+          posX: pos.ax,
+          posY: liftM,
+          posZ: pos.ay,
+          rotationY: ceiling ? 0 : facing,
+          scale: DEFAULT_SCALE,
+        };
         const seated = { ...placement, ...patch };
         working = [...working, seated];
         seatedAt.set(product.id, { ax: pos.ax, ay: pos.ay });
