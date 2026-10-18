@@ -115,6 +115,15 @@ function Studio() {
   const [items, setItems] = useState<PlacedItemDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  /* Tapping a piece in the room means "I want to work on this one", so bring its
+     properties up rather than making the user find the tab. Deselecting leaves
+     the panel where it is — snapping back to the Designer mid-edit would be
+     jarring, and an empty Properties tab still shows what to do next. */
+  const selectPiece = useCallback((id: string | null) => {
+    setSelectedId(id);
+    if (id) setPanel("properties");
+  }, []);
   const [addOpen, setAddOpen] = useState(false);
   const [renderOpen, setRenderOpen] = useState(false);
   const [renderEmptyAlert, setRenderEmptyAlert] = useState(false);
@@ -1442,7 +1451,7 @@ const isWorkSurface = (p: ProductDTO) =>
                 calib={calib}
                 depth={depth}
                 selectedId={selectedId}
-                onSelect={setSelectedId}
+                onSelect={selectPiece}
                 onMove={liveMove}
                 onDrop={dropItem}
               />
@@ -1725,6 +1734,21 @@ const isWorkSurface = (p: ProductDTO) =>
                   <Dim label="Height" v={selected.product.heightCm} />
                 </div>
 
+                {/* Turning a piece to face the right way is everyday work, not a
+                    power-user tweak, so it sits in the open. Lean and size stay
+                    behind Advanced. */}
+                <SliderRow
+                  label="Rotation"
+                  icon={RotateCw}
+                  value={selected.rotationY}
+                  min={0}
+                  max={360}
+                  step={1}
+                  suffix="°"
+                  onChange={(v) => updateSelected({ rotationY: v })}
+                  onCommit={(v) => updateSelected({ rotationY: v }, true)}
+                />
+
                 <Button variant="outline" className="w-full !text-rose-500 !border-rose-500/30 hover:!bg-rose-500/10" onClick={removeSelected}>
                   <Trash2 className="h-4 w-4" /> Remove from room
                 </Button>
@@ -1743,17 +1767,6 @@ const isWorkSurface = (p: ProductDTO) =>
                   </button>
                   {advancedOpen && (
                     <div className="space-y-4 mt-4">
-                      <SliderRow
-                        label="Rotation"
-                        icon={RotateCw}
-                        value={selected.rotationY}
-                        min={0}
-                        max={360}
-                        step={1}
-                        suffix="°"
-                        onChange={(v) => updateSelected({ rotationY: v })}
-                        onCommit={(v) => updateSelected({ rotationY: v }, true)}
-                      />
                       {selected.product.mount !== "ceiling" && (
                         <>
                           <SliderRow
