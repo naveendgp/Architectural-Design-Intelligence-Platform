@@ -529,28 +529,47 @@ RULES:
       ceiling treatment, architectural lighting, window treatment, and the
       REMOVAL of specific dated or cluttering things you can see.
     - SPECIFY MATERIALS, NOT COLOURS. "Paint the walls beige" is decorating; a
-      designer specifies a finish. Say what the surface IS: polished marble or
-      large-format porcelain flooring with real reflections, full-height walnut
-      or oak veneer wall panelling, fluted wood, microcement, a stone feature
-      wall, a coffered or stepped ceiling, recessed cove lighting and linear LED
-      profiles, brass or blackened-metal trim, full-height drapery.
+      designer specifies a finish. Say what the surface IS. The palette is wide
+      — these are FAMILIES to choose between, not a list to work through:
+        * stone: honed marble, travertine, limestone, slate, terrazzo, onyx
+        * ceramic: large-format porcelain, stone-effect tile, zellige, encaustic
+        * plaster: Venetian plaster, microcement, tadelakt, limewash, stucco
+        * timber: oak or walnut veneer, fluted or slatted battens, parquet, cane
+        * textile: upholstered or acoustic fabric panels, grasscloth, linen
+          wallcovering, full-height drapery
+        * glass and metal: fluted or reeded glass, mirror, brass or blackened
+          steel trim, metal mesh
+        * paint-grade joinery: lacquered or shaker panelling, picture-rail
+          mouldings, boiserie
+        * ceiling: coffered, stepped or raft ceilings, recessed cove lighting,
+          linear LED profiles, plaster-in downlights
+    - THE OPTIONS MUST DIFFER IN MATERIAL, not just in shade. Three timber
+      schemes is one idea offered three times. If one direction is timber, the
+      others should lead with stone, plaster, textile or lacquered joinery.
+      Timber panelling is one answer among many and must not be the default —
+      choose what suits THIS room's architecture, light and purpose.
     - MATCH THE AMBITION TO THE BRIEF. If the user asked for luxurious, premium,
-      executive or high-end, the materials must read that way — stone, timber
-      veneer, metal, layered architectural light. A minimal or budget brief gets
-      restrained finishes instead. Under-delivering on a luxury brief is as
-      wrong as over-decorating a simple one.
-      e.g. for a luxury brief: "Lay large-format polished marble flooring with
-      soft reflections, clad the walls in full-height walnut veneer panelling
-      with slim brass reveals, replace the grid ceiling with a stepped gypsum
-      ceiling with recessed cove lighting and linear LED profiles, and remove
-      the wall-mounted notices".
+      executive or high-end, the materials must read that way — real stone,
+      plaster, veneer, metal, layered architectural light. A minimal or budget
+      brief gets restrained finishes instead. Under-delivering on a luxury brief
+      is as wrong as over-decorating a simple one.
+      Three directions for one luxury brief, deliberately unalike:
+        "Lay honed travertine flooring, finish the walls in warm Venetian
+         plaster with a stone feature wall behind the desk, and add a stepped
+         ceiling with recessed cove lighting"
+        "Lay large-format polished porcelain, upholster the long wall in
+         acoustic fabric panels with slim brass reveals, and run linear LED
+         profiles down the ceiling"
+        "Lay dark stained oak parquet, clad the walls in fluted timber battens,
+         and fit a coffered ceiling with plaster-in downlights"
     - Include WINDOW TREATMENTS where the windows are bare or the existing
       curtains are dated — well-made drapes or sheers in keeping with the
       direction. A bare window is one of the strongest "unfinished room" signals.
     - Do NOT ask to remove or alter anything the user might want kept, such as
       windows, doors, or built-in structure.
     - reason: at most 12 words naming the MATERIALS that define this direction
-      (e.g. "Walnut panelling, honed marble, warm cove light"). It is shown under
+      (e.g. "Venetian plaster, travertine floor, brass reveals" or "Fluted oak,
+      terrazzo, warm cove light"). It is shown under
       the option's name as a one-line hint, so a full sentence will be cut off.
   ONLY propose this when the request is about the room's overall look or purpose
   ("make it modern", "turn this into a waiting area"). If the user asked for a
