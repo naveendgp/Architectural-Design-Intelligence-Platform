@@ -22,7 +22,12 @@ export const DEFAULT_CALIB: Calibration = {
   cameraHeightM: 1.5, // a person holding a phone
   horizonY: 0.5, // level camera; AI analysis refines this per photo
   ceilingHeightM: 2.7,
-  scale: 0.9, // 90% reads more realistic than exact metric size in these rooms
+  /* True metric size. This was 0.9 — a 10% shrink added back when depth was a
+     linear lerp and furniture came out oversized. The camera is measured now
+     (verified against a room's own window: 2.34m for floor-to-ceiling glass),
+     so the fudge only made everything read small. A 180cm bed was rendering at
+     162cm. Per-piece size is still adjustable in Properties. */
+  scale: 1,
 };
 
 /** Where a piece lands when it has no valid anchor yet. */

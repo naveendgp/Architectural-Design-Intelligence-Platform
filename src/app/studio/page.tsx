@@ -94,9 +94,8 @@ const DEFAULT_CALIB: Calibration = {
   cameraHeightM: 1.5,
   horizonY: 0.5,
   ceilingHeightM: 2.7,
-  // Furniture at real metric size (100%) reads a touch large in these rooms; 90%
-  // sits more convincingly. Users can still fine-tune via Calibrate → Furniture size.
-  scale: 0.9,
+  // True metric size — see placement.ts DEFAULT_CALIB for why this is no longer 0.9.
+  scale: 1,
 };
 
 export default function StudioPage() {
@@ -170,7 +169,13 @@ function Studio() {
     if (!projectId) return;
     try {
       const saved = window.localStorage.getItem(`calib:${projectId}`);
-      setCalib(saved ? { ...DEFAULT_CALIB, ...JSON.parse(saved) } : DEFAULT_CALIB);
+      const parsed = saved ? (JSON.parse(saved) as Partial<Calibration>) : null;
+      /* Retire the old 10% shrink. A room calibrated before furniture rendered at
+         true size carries scale 0.9, and would keep rendering small forever. An
+         exact 0.9 is the old default rather than a considered choice, so it is
+         dropped; anything else the user actually dialled in is kept. */
+      if (parsed && parsed.scale === 0.9) delete parsed.scale;
+      setCalib(parsed ? { ...DEFAULT_CALIB, ...parsed } : DEFAULT_CALIB);
     } catch {
       setCalib(DEFAULT_CALIB);
     }
@@ -729,6 +734,22 @@ const isDeskSeat = (p: ProductDTO) => hasTag(p, "pairs:desk") && hasTag(p, "role
 const isWorkSurface = (p: ProductDTO) =>
   hasTag(p, "role:desk") || hasTag(p, "role:meeting-table") || hasTag(p, "role:dining-table");
 
+/* Anything with a top a lamp can stand on. Restricting this to desks meant a
+   bedroom had no surfaces at all, so table lamps were seated like furniture and
+   ended up on the floor — one of them inside the bed. */
+const TOP_ROLES = [
+  "role:desk",
+  "role:meeting-table",
+  "role:dining-table",
+  "role:side-table",
+  "role:coffee-table",
+  "role:console",
+  "role:sideboard",
+  "role:dresser",
+  "role:media-unit",
+];
+const hasUsableTop = (p: ProductDTO) => TOP_ROLES.some((t) => hasTag(p, t));
+
 /** A piece the room is built around — it belongs along a wall. */
 const isAnchorPiece = (p: ProductDTO) =>
   p.mount !== "ceiling" && hasTag(p, "place:wall") && (p.widthCm ?? 0) >= 150;
@@ -817,10 +838,10 @@ const needsSurface = (p: ProductDTO) => hasTag(p, "place:on-surface");
       const findSurface = (): { ax: number; ay: number; topM: number } | null => {
         for (const [pid, at] of seatedAt) {
           const prod = products.find((x) => x.id === pid);
-          if (prod && isWorkSurface(prod)) return { ...at, topM: (prod.heightCm ?? 75) / 100 };
+          if (prod && hasUsableTop(prod)) return { ...at, topM: (prod.heightCm ?? 75) / 100 };
         }
         const standing = working.find(
-          (it) => it.product.mount !== "ceiling" && isWorkSurface(it.product),
+          (it) => it.product.mount !== "ceiling" && hasUsableTop(it.product),
         );
         return standing
           ? { ...itemAnchor(standing), topM: (standing.product.heightCm ?? 75) / 100 }
@@ -876,6 +897,11 @@ const needsSurface = (p: ProductDTO) => hasTag(p, "place:on-surface");
           if (behind.maxY - behind.minY >= 0.03) seatRegion = behind;
           start = { ax: desk.ax, ay: Math.max(seatRegion.minY, desk.ay - 0.06) };
           facing = 0;
+        } else if (needsSurface(product) && !findSurface()) {
+          /* Nothing in the room it could stand on. Report it rather than
+             standing a table lamp on the carpet. */
+          if (!skipped.includes(product.name)) skipped.push(product.name);
+          continue;
         } else if (needsSurface(product) && findSurface()) {
           /* Stand it ON the surface: same spot on the floor plan, lifted to the
              surface's height. Without this a desk lamp was seated like

@@ -38,13 +38,15 @@ export async function POST(req: Request) {
   const [, mime, b64] = match;
   const buffer = Buffer.from(b64, "base64");
 
-  /* Everything the room can actually receive — a product is placeable as soon as
-     it has a model, whether that model is its own or a stand-in. Restricting the
-     designer to READY hid half the catalogue from it: every desk, task chair,
-     meeting table and office storage wall sits in the newer listings, so a
-     "luxury office" brief could only reach for living-room pieces and came back
-     with a stool and a chair. */
-  const products = (await listProducts()).filter((p) => p.modelUrl);
+  /* ONLY pieces with their OWN model. Stand-ins borrow another product's
+     geometry, so the designer could propose a "Dome Marble Table Lamp" and the
+     room would receive whatever shape it borrowed — a bench, a slatted chair —
+     which is exactly what made a finished room look like a pile of unrelated
+     objects. A listing is still browsable in the marketplace; it just isn't
+     something the AI may design with until its real model lands. */
+  const products = (await listProducts()).filter(
+    (p) => p.modelUrl && p.status === "READY",
+  );
   if (products.length === 0) {
     return Response.json({ error: "catalog is empty", code: "empty" }, { status: 409 });
   }
