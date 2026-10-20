@@ -1446,8 +1446,10 @@ const needsSurface = (p: ProductDTO) => hasTag(p, "place:on-surface");
                       }}
                     />
                     <ToolItem
-                      icon={rearranging ? <Loader2 className="h-4 w-4 animate-spin text-primary" /> : <Shuffle className="h-4 w-4" />}
-                      label="Fix placement & size"
+                      /* The AI one — a wand, so it reads differently from the
+                         plain geometry repack directly beneath it. */
+                      icon={rearranging ? <Loader2 className="h-4 w-4 animate-spin text-primary" /> : <Wand2 className="h-4 w-4 text-primary" />}
+                      label={rearranging ? "Fixing layout…" : "Fix layout"}
                       disabled={rearranging || items.length < 1}
                       onClick={() => {
                         setToolsOpen(false);
@@ -1534,30 +1536,6 @@ const needsSurface = (p: ProductDTO) => hasTag(p, "place:on-surface");
           <div className="glass border border-border rounded-xl px-4 h-10 flex items-center text-sm font-medium pointer-events-auto">
             {project?.name ?? "Loading…"}
           </div>
-          {/* The way back when a layout comes out wrong. It sits here, beside
-              Render Scene, rather than behind the "+" menu: it is needed exactly
-              when someone is looking at a room that doesn't read right, and a
-              fix nobody can find is no fix. */}
-          {items.length > 0 && (
-            <Button
-              size="sm"
-              variant="secondary"
-              className="pointer-events-auto"
-              disabled={rearranging}
-              onClick={fixLayout}
-              title="Re-measure the room and lay the furniture out again"
-            >
-              {rearranging ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" /> Fixing…
-                </>
-              ) : (
-                <>
-                  <Wand2 className="h-4 w-4" /> Fix layout
-                </>
-              )}
-            </Button>
-          )}
           <Button
             size="sm"
             className="pointer-events-auto"
