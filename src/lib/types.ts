@@ -75,3 +75,16 @@ export type BudgetDTO = {
   total: number;
   byCategory: { name: string; value: number }[];
 };
+
+/** One turn of the AI Designer's conversation, as stored with its project. */
+export type ChatMessageDTO = {
+  id: string;
+  role: "user" | "ai";
+  text: string;
+  imageUrl: string | null;
+  /** JSON snapshot of a proposal that was shown; history, not a live plan. */
+  plan: string | null;
+  /** Which option was taken, when the message offered a choice. */
+  chose: string | null;
+  createdAt: string;
+};

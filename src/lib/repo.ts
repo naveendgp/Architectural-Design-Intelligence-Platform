@@ -6,6 +6,7 @@ import type {
   BudgetDTO,
   PlacedItemDTO,
   RenderDTO,
+  ChatMessageDTO,
   Style,
 } from "./types";
 
@@ -492,4 +493,68 @@ export async function deleteRender(id: string): Promise<{ beforeUrl: string; aft
   const r = res.rows[0] as unknown as Row;
   await db.execute({ sql: "DELETE FROM Render WHERE id = ?", args: [id] });
   return { beforeUrl: str(r.beforeUrl), afterUrl: str(r.afterUrl) };
+}
+
+
+/* ── AI Designer conversation ────────────────────────────────────────────── */
+
+export async function listChatMessages(projectId: string): Promise<ChatMessageDTO[]> {
+  await ensureDb();
+  const res = await db.execute({
+    sql: `SELECT id, role, text, imageUrl, plan, chose, createdAt
+          FROM ChatMessage WHERE projectId = ? ORDER BY createdAt ASC, rowid ASC`,
+    args: [projectId],
+  });
+  return (res.rows as unknown as Row[]).map((r) => ({
+    id: str(r.id),
+    role: str(r.role) === "user" ? "user" : "ai",
+    text: str(r.text),
+    imageUrl: r.imageUrl == null ? null : str(r.imageUrl),
+    plan: r.plan == null ? null : str(r.plan),
+    chose: r.chose == null ? null : str(r.chose),
+    createdAt: str(r.createdAt),
+  }));
+}
+
+export async function addChatMessage(
+  projectId: string,
+  msg: { role: "user" | "ai"; text: string; imageUrl?: string | null; plan?: string | null; chose?: string | null },
+): Promise<ChatMessageDTO | null> {
+  await ensureDb();
+  const id = randomUUID();
+  await db.execute({
+    sql: `INSERT INTO ChatMessage (id, projectId, role, text, imageUrl, plan, chose)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    args: [id, projectId, msg.role, msg.text, msg.imageUrl ?? null, msg.plan ?? null, msg.chose ?? null],
+  });
+  const res = await db.execute({
+    sql: "SELECT id, role, text, imageUrl, plan, chose, createdAt FROM ChatMessage WHERE id = ?",
+    args: [id],
+  });
+  if (!res.rows.length) return null;
+  const r = res.rows[0] as unknown as Row;
+  return {
+    id: str(r.id),
+    role: str(r.role) === "user" ? "user" : "ai",
+    text: str(r.text),
+    imageUrl: r.imageUrl == null ? null : str(r.imageUrl),
+    plan: r.plan == null ? null : str(r.plan),
+    chose: r.chose == null ? null : str(r.chose),
+    createdAt: str(r.createdAt),
+  };
+}
+
+/** Wipe a project's conversation — used by "clear chat". */
+export async function clearChatMessages(projectId: string): Promise<void> {
+  await ensureDb();
+  await db.execute({ sql: "DELETE FROM ChatMessage WHERE projectId = ?", args: [projectId] });
+}
+
+/** Record which option was taken on a message that offered a choice. */
+export async function setChatChoice(projectId: string, messageId: string, chose: string): Promise<void> {
+  await ensureDb();
+  await db.execute({
+    sql: "UPDATE ChatMessage SET chose = ? WHERE id = ? AND projectId = ?",
+    args: [chose, messageId, projectId],
+  });
 }

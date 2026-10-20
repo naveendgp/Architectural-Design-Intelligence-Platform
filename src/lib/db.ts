@@ -67,6 +67,23 @@ const SCHEMA = [
     scale REAL NOT NULL DEFAULT 1,
     createdAt TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
+  /* The AI Designer's conversation, kept with the project rather than in the
+     browser. A room's brief is part of its record: reopen it weeks later and
+     the discussion that produced it is still there, on any machine.
+
+     `plan` is a JSON snapshot of a proposal — what was offered, at what price —
+     not a live object. A restored plan is history and renders read-only;
+     re-applying one to a room that has since changed would be wrong. */
+  `CREATE TABLE IF NOT EXISTS ChatMessage (
+    id TEXT PRIMARY KEY,
+    projectId TEXT NOT NULL REFERENCES RoomProject(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    text TEXT NOT NULL,
+    imageUrl TEXT,
+    plan TEXT,
+    chose TEXT,
+    createdAt TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
   // Photorealistic renders generated from a project's scene (before/after snapshots).
   `CREATE TABLE IF NOT EXISTS Render (
     id TEXT PRIMARY KEY,

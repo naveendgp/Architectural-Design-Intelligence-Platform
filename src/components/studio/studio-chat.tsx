@@ -49,6 +49,8 @@ type Msg = {
   actions?: Action[];
   /** Once chosen, the buttons collapse to the label that was picked. */
   chose?: string;
+  /** Restored from the database: history, not something to act on again. */
+  historic?: boolean;
 };
 
 /* An explicit instruction to undo the room edit.
@@ -163,6 +165,89 @@ export function StudioChat({
   // The bar is always docked; `expanded` only controls the conversation above it.
   const [expanded, setExpanded] = useState(true);
   const [messages, setMessages] = useState<Msg[]>([]);
+
+  /* The conversation is kept WITH THE PROJECT, not in this tab. A room's brief
+     is part of its record: reopen it weeks later, on any machine, and the
+     discussion that produced it is still there.
+
+     Saving hangs off the messages array rather than the five places that append
+     to it, so no future call site can forget. savedRef maps a local id to its
+     database id; "" means a save is in flight, which stops a re-render from
+     writing the same turn twice. */
+  const savedRef = useRef(new Map<number, string>());
+  const choseRef = useRef(new Map<number, string>());
+
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    savedRef.current = new Map();
+    choseRef.current = new Map();
+    setMessages([]);
+    api
+      .chatMessages(projectId)
+      .then((res) => {
+        if (cancelled || !res?.messages?.length) return;
+        setMessages(
+          res.messages.map((r) => {
+            const id = nextId();
+            savedRef.current.set(id, r.id);
+            if (r.chose) choseRef.current.set(id, r.chose);
+            let plan: Plan | undefined;
+            try {
+              plan = r.plan ? (JSON.parse(r.plan) as Plan) : undefined;
+            } catch {
+              plan = undefined; // a corrupt snapshot shouldn't break the panel
+            }
+            return {
+              id,
+              role: r.role,
+              text: r.text,
+              image: r.imageUrl ?? undefined,
+              plan,
+              chose: r.chose ?? undefined,
+              historic: true,
+            };
+          }),
+        );
+      })
+      .catch(() => {
+        // No history is not an error — a fresh project simply has none.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    for (const m of messages) {
+      const known = savedRef.current.get(m.id);
+      if (known === undefined) {
+        savedRef.current.set(m.id, ""); // claim it before the await
+        if (m.chose) choseRef.current.set(m.id, m.chose);
+        api
+          .saveChatMessage(projectId, {
+            role: m.role,
+            text: m.text,
+            imageUrl: m.image ?? null,
+            /* The proposal as it was shown — what was offered and at what
+               price. Actions are closures and cannot be stored, which is why a
+               restored plan is read-only. */
+            plan: m.plan ? JSON.stringify({ ...m.plan, applied: true }) : null,
+            chose: m.chose ?? null,
+          })
+          .then((res) => {
+            if (res?.message) savedRef.current.set(m.id, res.message.id);
+          })
+          .catch(() => {
+            savedRef.current.delete(m.id); // let a later render retry
+          });
+      } else if (known && m.chose && choseRef.current.get(m.id) !== m.chose) {
+        choseRef.current.set(m.id, m.chose);
+        api.setChatChoice(projectId, known, m.chose).catch(() => {});
+      }
+    }
+  }, [messages, projectId]);
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -814,7 +899,9 @@ export function StudioChat({
                      since clearing `actions` would otherwise re-expose it and let
                      the same plan be added twice. */
                   onApply={
-                    m.plan && !m.actions && !m.chose ? () => applyPlan(m.id, m.plan!) : undefined
+                    m.plan && !m.actions && !m.chose && !m.historic
+                      ? () => applyPlan(m.id, m.plan!)
+                      : undefined
                   }
                 />
               ))}

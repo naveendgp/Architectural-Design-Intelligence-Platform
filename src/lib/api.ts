@@ -4,6 +4,7 @@ import type {
   BudgetDTO,
   PlacedItemDTO,
   RenderDTO,
+  ChatMessageDTO,
 } from "./types";
 
 async function get<T>(url: string): Promise<T> {
@@ -251,6 +252,23 @@ export const api = {
       "POST",
       { productId },
     ).then((r) => r.placement),
+  /** A project's saved AI Designer conversation, oldest first. */
+  chatMessages: (projectId: string) =>
+    send<{ messages: ChatMessageDTO[] }>(`/api/projects/${projectId}/chat`, "GET"),
+
+  /** Append one turn. Fire-and-forget: a failed save must never break the chat. */
+  saveChatMessage: (
+    projectId: string,
+    msg: { role: "user" | "ai"; text: string; imageUrl?: string | null; plan?: string | null; chose?: string | null },
+  ) => send<{ message: ChatMessageDTO | null }>(`/api/projects/${projectId}/chat`, "POST", msg),
+
+  /** Record which option was taken, once the user picks one. */
+  setChatChoice: (projectId: string, messageId: string, chose: string) =>
+    send<{ ok: true }>(`/api/projects/${projectId}/chat`, "PATCH", { messageId, chose }),
+
+  clearChat: (projectId: string) =>
+    send<{ ok: true }>(`/api/projects/${projectId}/chat`, "DELETE"),
+
   /** What is this message asking for? Text-only and cheap; the chat falls back
       to its own keyword rules if it fails. */
   classifyIntent: (message: string, canRevert: boolean) =>
