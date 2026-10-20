@@ -51,6 +51,21 @@ type Msg = {
   chose?: string;
 };
 
+/* An explicit instruction to undo the room edit.
+
+   This has to stay NARROW, and especially it must not key off the word
+   "original". A design brief routinely says "preserve the original windows,
+   doors and room dimensions" — and that reverted the room, answered "Reverted
+   the room to its original photo", and designed nothing. A revert is a short
+   command, not a paragraph that happens to contain the word. */
+function isRevert(t: string): boolean {
+  if (!/\b(revert|undo|reset|restore)\b/.test(t)) return false;
+  // A brief that asks for work is never a request to undo work.
+  if (/\b(transform|re-?design|furnish|convert|add|place|decorate|style)\b/.test(t)) return false;
+  if (/\b(turn|make)\b[^.]*\b(into|a|an)\b/.test(t)) return false;
+  return t.trim().split(/\s+/).length <= 10;
+}
+
 /* Detect a request to change the room's SURFACES ONLY — wallpaper, paint,
    flooring — which can go straight to a single image edit.
 
@@ -240,7 +255,7 @@ export function StudioChat({
     setExpanded(true); // any new exchange pulls the conversation back into view
 
     // Revert the room to its original photo.
-    if (onRevert && /\b(revert|undo|reset|original)\b/.test(t) && /\b(room|wall|change|photo|edit|it)\b/.test(t)) {
+    if (onRevert && isRevert(t)) {
       setBusy(true);
       setTyping(true);
       try {
