@@ -27,6 +27,7 @@ import {
   Grid2x2,
   Loader2,
   Shuffle,
+  Wand2,
   Search,
   LayoutGrid,
 } from "lucide-react";
@@ -1004,6 +1005,130 @@ const needsSurface = (p: ProductDTO) => hasTag(p, "place:on-surface");
     }
   }, [items, stage, calib, depth, realObjects]);
 
+  /* Re-lay-out a room that came out wrong.
+
+     The automatic pass runs once, on whatever the camera was measured as at the
+     time, and a bad estimate or an awkward composition is then stuck. This is
+     the way back: it re-measures the room, re-arranges every piece that is
+     already in it, and clears any size the user or an earlier run dialled in.
+     Nothing is added or removed — the same furniture, laid out again. */
+  const fixLayout = useCallback(async () => {
+    if (!projectId || items.length === 0 || !project?.photoUrl || !stageRef.current) return;
+    setRearranging(true);
+    try {
+      /* 1. Re-measure the room. The cache is keyed on the photo, so dropping
+            this entry forces a fresh camera rather than reusing a bad one. */
+      try {
+        const key = `roomAnalysis4:${projectId}:${project.photoUrl}`;
+        window.localStorage.removeItem(key);
+        const shot = await capturePhotoView(stageRef.current, project.photoUrl);
+        const fresh = await api.analyze(shot);
+        if (fresh) {
+          window.localStorage.setItem(key, JSON.stringify(fresh));
+          if (typeof fresh.cameraHeightM === "number" && typeof fresh.horizonY === "number") {
+            applyCalib((c) => ({
+              ...c,
+              cameraHeightM: fresh.cameraHeightM!,
+              horizonY: fresh.horizonY!,
+              ceilingHeightM: fresh.ceilingHeightM ?? c.ceilingHeightM,
+              scale: DEFAULT_CALIB.scale, // drop any global size fudge
+            }));
+          }
+          setSceneCalib({ floorTop: fresh.floorTop, ceilingBottom: fresh.ceilingBottom });
+          setRealObjects(fresh.objects);
+          setAnalysisNonce((n) => n + 1);
+        }
+      } catch {
+        // Measurement failed — carry on and at least re-arrange.
+      }
+
+      /* 2. Ask for a fresh composition of exactly what is already here. The
+            PHOTO ONLY: showing the furniture would invite it to design around
+            the very layout we are trying to replace. */
+      const roleOf = (p: ProductDTO) =>
+        (p.aiTags ?? []).find((t) => t.startsWith("role:"))?.slice(5) ?? p.category;
+      const band = floorRegion();
+      let spots: { i: number; ax: number; ay: number; facingDeg: number }[] = [];
+      try {
+        const shot = await capturePhotoView(stageRef.current, project.photoUrl);
+        const res = await Promise.race([
+          api.layout({
+            image: shot,
+            pieces: items.map((it, i) => ({
+              i,
+              name: it.product.name,
+              role: roleOf(it.product),
+              widthCm: it.product.widthCm,
+              depthCm: it.product.depthCm,
+              heightCm: it.product.heightCm,
+              mount: it.product.mount === "ceiling" ? ("ceiling" as const) : ("floor" as const),
+            })),
+            floorBand: { minY: band.minY, maxY: band.maxY },
+          }),
+          new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout")), 30000)),
+        ]);
+        spots = res?.spots ?? [];
+      } catch {
+        // No layout — the geometry re-pack below still separates everything.
+      }
+
+      /* 3. Seat each piece: the proposed spot where there is one, grounded and
+            collision-checked; otherwise leave it where it stands. Sizes go back
+            to true metric so nothing stays stretched. */
+      const aspect = stage.w / Math.max(1, stage.h);
+      const obstacles = realObjects.map((b) => objectBoxToOBB(b, aspect, calib, depth));
+      const autoFloor = {
+        ...band,
+        maxY: band.minY + (band.maxY - band.minY) * 0.82,
+      };
+      const byIndex = new Map(spots.map((sp) => [sp.i, sp] as const));
+      let working: PlacedItemDTO[] = [];
+      const patches: { id: string; patch: Partial<PlacedItemDTO> }[] = [];
+
+      for (const [i, it] of items.entries()) {
+        const ceiling = it.product.mount === "ceiling";
+        const sp = byIndex.get(i);
+        const spec: FootprintSpec = {
+          widthCm: it.product.widthCm,
+          depthCm: it.product.depthCm,
+          scale: DEFAULT_SCALE,
+          yawDeg: (it.product.frontYaw ?? 0) + (depth?.roomYawDeg ?? 0) + (sp?.facingDeg ?? it.rotationY),
+          mount: ceiling ? "ceiling" : "floor",
+        };
+        const samePlane = working.filter((w) => (w.product.mount === "ceiling") === ceiling);
+        const region = ceiling ? CEILING_ANCHOR_BAND : autoFloor;
+        const start = sp
+          ? ceiling
+            ? ceilingAnchor(sp.ax, sp.ay)
+            : {
+                ax: clampAnchor(sp.ax),
+                ay: Math.min(autoFloor.maxY, Math.max(autoFloor.minY, sp.ay)),
+              }
+          : itemAnchor(it);
+        const free =
+          findFreeAnchor(start.ax, start.ay, spec, samePlane, aspect, calib, depth, region, obstacles) ??
+          findFreeAnchor(start.ax, start.ay, spec, samePlane, aspect, calib, depth, region, []) ??
+          start;
+        const pos = ceiling ? ceilingAnchor(free.ax, free.ay) : { ax: clampAnchor(free.ax), ay: clampAnchor(free.ay) };
+        const patch = {
+          posX: pos.ax,
+          posZ: pos.ay,
+          rotationY: ceiling ? 0 : (sp?.facingDeg ?? it.rotationY),
+          scale: DEFAULT_SCALE,
+        };
+        working = [...working, { ...it, ...patch }];
+        patches.push({ id: it.id, patch });
+      }
+
+      setItems(working);
+      await Promise.all(
+        patches.map((p) => api.updatePlacement(p.id, p.patch as never).catch(() => {})),
+      );
+    } finally {
+      setRearranging(false);
+    }
+  }, [projectId, project?.photoUrl, items, stage, calib, depth, realObjects, applyCalib]);
+
   // AI auto-fit: ask Gemini if the placed furniture is realistically sized for the
   // room, and adjust the global furniture-size calibration to match.
   const autoFitScale = useCallback(async () => {
@@ -1322,7 +1447,16 @@ const needsSurface = (p: ProductDTO) => hasTag(p, "place:on-surface");
                     />
                     <ToolItem
                       icon={rearranging ? <Loader2 className="h-4 w-4 animate-spin text-primary" /> : <Shuffle className="h-4 w-4" />}
-                      label="Auto-arrange room"
+                      label="Fix placement & size"
+                      disabled={rearranging || items.length < 1}
+                      onClick={() => {
+                        setToolsOpen(false);
+                        fixLayout();
+                      }}
+                    />
+                    <ToolItem
+                      icon={<Shuffle className="h-4 w-4" />}
+                      label="Just space them out"
                       disabled={rearranging || items.length < 2}
                       onClick={() => {
                         setToolsOpen(false);
@@ -1400,6 +1534,30 @@ const needsSurface = (p: ProductDTO) => hasTag(p, "place:on-surface");
           <div className="glass border border-border rounded-xl px-4 h-10 flex items-center text-sm font-medium pointer-events-auto">
             {project?.name ?? "Loading…"}
           </div>
+          {/* The way back when a layout comes out wrong. It sits here, beside
+              Render Scene, rather than behind the "+" menu: it is needed exactly
+              when someone is looking at a room that doesn't read right, and a
+              fix nobody can find is no fix. */}
+          {items.length > 0 && (
+            <Button
+              size="sm"
+              variant="secondary"
+              className="pointer-events-auto"
+              disabled={rearranging}
+              onClick={fixLayout}
+              title="Re-measure the room and lay the furniture out again"
+            >
+              {rearranging ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Fixing…
+                </>
+              ) : (
+                <>
+                  <Wand2 className="h-4 w-4" /> Fix layout
+                </>
+              )}
+            </Button>
+          )}
           <Button
             size="sm"
             className="pointer-events-auto"
