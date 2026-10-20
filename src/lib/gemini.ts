@@ -187,6 +187,131 @@ ${ceiling
   };
 }
 
+/* ── Whole-room layout ────────────────────────────────────────────────────────
+   One call that arranges the ENTIRE set, instead of asking where a single piece
+   goes and reusing that answer for everything else — which is literally why a
+   lamp inherited a desk's position.
+
+   Composition is judgement: which wall the sofa belongs against, what faces
+   what, where a walkway has to stay clear. A vision model is good at that and
+   geometry is not. Geometry is good at measuring, which the model is not — so
+   whatever comes back is treated as a PROPOSAL and then grounded, paired and
+   collision-checked by the packer before anything is placed. */
+
+export type LayoutPiece = {
+  /** Index the model refers to, so names never have to be matched back. */
+  i: number;
+  name: string;
+  role: string;
+  widthCm: number | null;
+  depthCm: number | null;
+  heightCm: number | null;
+  mount: "floor" | "ceiling";
+};
+
+export type LayoutSpot = { i: number; ax: number; ay: number; facingDeg: number; note?: string };
+
+export async function layoutRoom(
+  image: Buffer,
+  mimeType: string,
+  pieces: LayoutPiece[],
+  floorBand: { minY: number; maxY: number },
+): Promise<LayoutSpot[]> {
+  const list = pieces
+    .map((p) => {
+      const dims = [p.widthCm && `${p.widthCm}w`, p.depthCm && `${p.depthCm}d`, p.heightCm && `${p.heightCm}h`]
+        .filter(Boolean)
+        .join("×");
+      return `- i=${p.i} | "${p.name}" | ${p.role} | ${p.mount}-mounted${dims ? ` | ${dims}cm` : ""}`;
+    })
+    .join("\n");
+
+  const prompt = `You are an interior designer setting out furniture in this real room.
+Decide where EVERY piece below stands. Coordinates are normalized on the photo:
+0,0 = TOP-LEFT, 1,1 = BOTTOM-RIGHT.
+
+THE PIECES (place all of them):
+${list}
+
+FOR EACH PIECE return:
+- i: the index above.
+- ax, ay: the point where the piece's base CONTACTS THE FLOOR — the floor pixel
+  it stands on, not its middle and not a point on a wall. For floor pieces ay
+  must be between ${floorBand.minY.toFixed(2)} and ${floorBand.maxY.toFixed(2)};
+  that band IS the visible floor. Ceiling fixtures instead take a point on the
+  visible ceiling near the top of the photo.
+- facingDeg: which way its FRONT points. 0 = toward the camera, 90 = to the
+  right of the photo, 180 = toward the back of the room, 270 = to the left.
+
+COMPOSE IT LIKE A ROOM, NOT A WAREHOUSE:
+- ANCHOR FIRST. The largest piece — the desk, sofa or bed — goes against the
+  most sensible wall for its purpose, square to that wall, and everything else
+  is arranged around it.
+- AGAINST A WALL MEANS AGAINST IT. A sofa, desk, bed, wardrobe or storage unit
+  sits with its back to a wall, facing INTO the room. Do not leave a wall piece
+  stranded in open floor.
+- GROUP WHAT BELONGS TOGETHER. A desk and its chair are one group: the chair
+  goes BEHIND the desk (further from the camera) facing the camera across it.
+  Dining chairs are spaced evenly around their table, each turned to face it.
+  A coffee table sits centred in front of the sofa, about half a metre away.
+  A side table sits at the END of a sofa or beside a chair. A floor lamp goes
+  at the outer corner of a seating group, never marooned mid-floor.
+- SEATING FACES SEATING. Chairs placed opposite a sofa or a desk turn to face
+  it, so the group reads as a conversation rather than a showroom row.
+- KEEP A WALKWAY. Leave a clear route through the room — roughly the middle of
+  the floor, or a straight run down a corridor. Nothing in a doorway.
+- SPREAD ALONG THE ROOM. Pieces at very different distances from the camera
+  look mis-scaled even when they are not, so keep the set within a sensible
+  depth of each other and avoid the very front of the frame.
+- DO NOT STACK. Two floor pieces must never share the same spot. Account for
+  each piece's width and depth above when spacing them.
+- note: 3-6 words on the placement, e.g. "against back wall, facing in".
+
+Study the photo first: where are the walls, the doors, the window, the open
+floor? Place to THIS room, not a generic one.`;
+
+  const parsed = await generateJson(image, mimeType, prompt, {
+    type: "object",
+    properties: {
+      spots: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            i: { type: "number" },
+            ax: { type: "number" },
+            ay: { type: "number" },
+            facingDeg: { type: "number" },
+            note: { type: "string" },
+          },
+          required: ["i", "ax", "ay", "facingDeg"],
+        },
+      },
+    },
+    required: ["spots"],
+  });
+
+  const raw = Array.isArray(parsed.spots) ? (parsed.spots as unknown[]) : [];
+  const out: LayoutSpot[] = [];
+  for (const r of raw) {
+    const o = r as Record<string, unknown>;
+    const i = Number(o.i);
+    const ax = Number(o.ax);
+    const ay = Number(o.ay);
+    if (!Number.isFinite(i) || !Number.isFinite(ax) || !Number.isFinite(ay)) continue;
+    if (!pieces.some((p) => p.i === i)) continue; // never invent a piece
+    const facing = Number(o.facingDeg);
+    out.push({
+      i,
+      ax: clamp01(ax),
+      ay: clamp01(ay),
+      facingDeg: Number.isFinite(facing) ? ((facing % 360) + 360) % 360 : 0,
+      note: typeof o.note === "string" ? o.note : undefined,
+    });
+  }
+  return out;
+}
+
 /* ── Design planner ───────────────────────────────────────────────────────────
    Turns a free-form request ("convert this lift lobby into a modern office
    waiting area, under ₹5 lakh") into a concrete list of catalog pieces. This is

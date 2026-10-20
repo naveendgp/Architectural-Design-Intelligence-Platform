@@ -251,6 +251,27 @@ export const api = {
       "POST",
       { productId },
     ).then((r) => r.placement),
+  /** Arrange a whole set at once. Spots are a proposal — the caller grounds,
+      pairs and collision-checks them before anything is placed. */
+  layout: (body: {
+    image: string;
+    pieces: {
+      i: number;
+      name: string;
+      role: string;
+      widthCm: number | null;
+      depthCm: number | null;
+      heightCm: number | null;
+      mount: "floor" | "ceiling";
+    }[];
+    floorBand: { minY: number; maxY: number };
+  }) =>
+    send<{ spots: { i: number; ax: number; ay: number; facingDeg: number; note?: string }[] }>(
+      "/api/ai/layout",
+      "POST",
+      body,
+    ),
+
   updatePlacement: (
     id: string,
     patch: Partial<

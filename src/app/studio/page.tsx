@@ -753,46 +753,48 @@ const needsSurface = (p: ProductDTO) => hasTag(p, "place:on-surface");
 
       setPlacing(true);
 
-      // One Gemini call for the batch: its candidate spots become seeds we cycle
-      // through, so pieces start in sensible, spread-out parts of the room.
-      let seeds: { ax: number; ay: number; facingDeg: number }[] = [];
-      const leadFloor = queue.find((p) => p.mount !== "ceiling");
+      /* ONE call lays out the WHOLE set.
+
+         It used to ask where the LEAD piece should go and then cycle that
+         answer across everything else, so a lamp inherited a desk's position
+         and the result read as furniture thrown in at random. Composition is
+         judgement — which wall the sofa belongs against, what faces what — and
+         a vision model is good at that. What comes back is a PROPOSAL: every
+         spot is still grounded onto the floor line, overridden by the pairing
+         rules below, and collision-checked by the packer before use. */
+      const roleOf = (p: ProductDTO) =>
+        (p.aiTags ?? []).find((t) => t.startsWith("role:"))?.slice(5) ?? p.category;
+
+      const layout = new Map<number, { ax: number; ay: number; facingDeg: number }>();
       try {
-        if (leadFloor && project?.photoUrl && stageRef.current) {
+        if (project?.photoUrl && stageRef.current) {
           const shot = await captureComposite(stageRef.current, project.photoUrl);
-          const plan = await Promise.race([
-            api.place({
+          const band = floorRegion();
+          const res = await Promise.race([
+            api.layout({
               image: shot,
-              item: {
-                name: leadFloor.name,
-                category: leadFloor.category,
-                mount: "floor",
-                widthCm: leadFloor.widthCm,
-                depthCm: leadFloor.depthCm,
-                heightCm: leadFloor.heightCm,
-              },
-              placed: items.map((it) => {
-                const a = itemAnchor(it);
-                return { name: it.product.name, mount: it.product.mount, ax: a.ax, ay: a.ay };
-              }),
+              pieces: queue.map((p, i) => ({
+                i,
+                name: p.name,
+                role: roleOf(p),
+                widthCm: p.widthCm,
+                depthCm: p.depthCm,
+                heightCm: p.heightCm,
+                mount: p.mount === "ceiling" ? ("ceiling" as const) : ("floor" as const),
+              })),
+              floorBand: { minY: band.minY, maxY: band.maxY },
             }),
-            new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout")), 25000)),
+            new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout")), 30000)),
           ]);
-          if (plan) {
-            seeds = [
-              { ax: plan.ax, ay: plan.ay, facingDeg: plan.facingDeg ?? 0 },
-              ...(plan.spots ?? []).map((s) => ({ ax: s.ax, ay: s.ay, facingDeg: s.facingDeg ?? 0 })),
-            ];
-          }
+          for (const sp of res?.spots ?? []) layout.set(sp.i, sp);
         }
       } catch {
-        seeds = []; // quota/timeout — geometry-only placement below still works
+        // Quota or timeout — the rules and packer below still produce a layout.
       }
 
       let working: PlacedItemDTO[] = [...items];
       const skipped: string[] = [];
       let added = 0;
-      let floorIndex = 0;
 
       /* Auto-placement avoids the nearest slice of floor. It is real floor and a
          user may still drag a piece there, but anything the ENGINE seats within
@@ -836,7 +838,8 @@ const needsSurface = (p: ProductDTO) => hasTag(p, "place:on-surface");
         return standing ? itemAnchor(standing) : null;
       };
 
-      for (const product of queue) {
+      for (const [qi, product] of queue.entries()) {
+        const proposed = layout.get(qi);
         const ceiling = product.mount === "ceiling";
         // Most pieces search the whole auto band; a desk seat narrows it below.
         let seatRegion = autoFloor;
@@ -856,7 +859,9 @@ const needsSurface = (p: ProductDTO) => hasTag(p, "place:on-surface");
         let liftM = 0; // metres above the floor; non-zero only for on-surface pieces
         if (ceiling) {
           const n = samePlane.length;
-          start = ceilingAnchor(n === 0 ? 0.5 : 0.5 + (n % 2 === 1 ? 0.18 : -0.18) * Math.ceil(n / 2), CEILING_FALLBACK.posZ);
+          start = proposed
+            ? ceilingAnchor(proposed.ax, proposed.ay)
+            : ceilingAnchor(n === 0 ? 0.5 : 0.5 + (n % 2 === 1 ? 0.18 : -0.18) * Math.ceil(n / 2), CEILING_FALLBACK.posZ);
         } else if (isDeskSeat(product) && findDeskAnchor()) {
           /* You sit BEHIND a desk, not in front of it. "Behind" here means
              further from the camera — a smaller ay — so the search is capped at
@@ -879,18 +884,22 @@ const needsSurface = (p: ProductDTO) => hasTag(p, "place:on-surface");
           start = { ax: Math.min(0.96, surf.ax + 0.08), ay: surf.ay };
           liftM = surf.topM;
           facing = 0;
+        } else if (proposed) {
+          /* The composed position, held to the band the engine will seat in.
+             Facing comes from the layout too — this is the only thing that ever
+             turned a sofa to look into the room rather than at the camera. */
+          start = {
+            ax: clampAnchor(proposed.ax),
+            ay: Math.min(autoFloor.maxY, Math.max(autoFloor.minY, proposed.ay)),
+          };
+          facing = proposed.facingDeg;
         } else if (isAnchorPiece(product)) {
-          /* Against the far wall, square to it, and nudged off-centre only to
-             clear whatever is already there. */
+          /* No layout came back (quota, timeout). A piece that belongs on a wall
+             still goes to the far wall rather than the middle of the floor. */
           const alongWall = autoFloor.minY + 0.03;
           const n = working.filter((it) => it.product.mount !== "ceiling").length;
           start = { ax: 0.5 + (n % 2 === 1 ? 0.2 : -0.2) * Math.ceil(n / 2), ay: alongWall };
           facing = 0;
-        } else if (seeds.length) {
-          const seed = seeds[floorIndex % seeds.length];
-          floorIndex++;
-          start = { ax: seed.ax, ay: Math.min(autoFloor.maxY, Math.max(autoFloor.minY, seed.ay)) };
-          facing = seed.facingDeg;
         } else {
           start = { ax: FLOOR_FALLBACK.posX, ay: FLOOR_FALLBACK.posZ };
         }
