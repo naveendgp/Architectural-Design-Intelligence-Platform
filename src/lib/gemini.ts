@@ -846,6 +846,67 @@ scaled: 1.0 means it is already right, 0.7 means it is too big and should shrink
   return Math.min(1.6, Math.max(0.4, m)); // clamp to a sane range
 }
 
+/* What IS this product, functionally?
+
+   The catalogue was tagged by matching product names, and names are marketing:
+   a 280x98x47cm "Walnut Horizon Table" matched no rule, fell through to the
+   catch-all for Tables, and was labelled a side table — so the designer used a
+   meeting table as a living-room coffee table. Reading the photo and the real
+   dimensions settles what a piece is in a way its name never will. */
+export async function classifyProductTags(
+  image: Buffer,
+  mimeType: string,
+  p: { name: string; category: string; widthCm: number | null; depthCm: number | null; heightCm: number | null; mount: string },
+): Promise<string[]> {
+  const dims = `${p.widthCm ?? "?"}cm wide x ${p.depthCm ?? "?"}cm deep x ${p.heightCm ?? "?"}cm tall`;
+  const prompt = `Look at this product photo and say what the piece IS, functionally.
+
+Listed as: "${p.name}" | category ${p.category} | ${dims} | ${p.mount}-mounted
+
+Weigh all three. The name is a HINT and often marketing ("Horizon", "Serenity"
+say nothing) — but a plain functional word in it is strong evidence of what the
+piece was made for: desk, conference, dining, nightstand, wardrobe, sideboard.
+Respect those. The photo and the proportions decide everything the name leaves
+open, and override a name with no functional word in it.
+
+Length separates pieces of the same kind: a 280cm table seats people, a 45cm one
+sits beside a chair. Treat HEIGHT as a weaker signal than the name or the photo
+— these measurements are derived from the 3D model and can be off — so do not
+demote a piece the name and photo both call a desk or a conference table just
+because its height reads low.
+
+role — pick exactly ONE:
+  desk, meeting-table, dining-table, coffee-table, side-table, console,
+  task-chair, dining-chair, lounge-chair, stool, sofa, bed, wardrobe, dresser,
+  sideboard, display, media-unit, chandelier, pendant, ceiling-light,
+  wall-light, floor-lamp, table-lamp, decor
+
+room — every room it genuinely suits, from: office, meeting, living, bedroom,
+  dining, reception. Omit entirely if it suits any room.
+
+place — exactly ONE: wall (its back belongs against one), free (it stands in
+  open floor), beside-seating, on-surface (it stands ON a table or desk),
+  ceiling.
+
+pairs — what it belongs with, if anything: desk, task-chair, dining-table,
+  dining-chair, sofa, bed.
+
+Return them as a flat list of strings, each prefixed with its kind, e.g.
+["role:coffee-table","room:living","place:beside-seating","pairs:sofa"].`;
+
+  const parsed = await generateJson(image, mimeType, prompt, {
+    type: "object",
+    properties: { tags: { type: "array", items: { type: "string" } } },
+    required: ["tags"],
+  });
+
+  const raw = Array.isArray(parsed.tags) ? (parsed.tags as unknown[]) : [];
+  const ok = /^(role|room|place|pairs):[a-z-]+$/;
+  const tags = raw.map(String).map((t) => t.trim()).filter((t) => ok.test(t));
+  // A piece with no role is worse than useless — it would match nothing.
+  return tags.some((t) => t.startsWith("role:")) ? [...new Set(tags)] : [];
+}
+
 export type FloorObject = { label: string; x0: number; y0: number; x1: number; y1: number };
 // floorTop[i] / ceilingBottom[i] = the normalized y of the wall–floor / wall–ceiling
 // line, sampled left→right at x = 0, 1/6, 2/6 … 1 (7 points). Floor is BELOW floorTop;

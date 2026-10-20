@@ -82,12 +82,57 @@ const FALLBACK = {
   Decor: ["role:decor", "place:on-surface"],
 };
 
-const rows = (await db.execute("SELECT id, name, category, mount, widthCm FROM Product")).rows;
+/* The name rules above are now the FALLBACK. The catalogue is tagged from each
+   product's own PHOTO and measurements, because names lie: a 280x98x47cm
+   "Walnut Horizon Table" matched no rule, fell through to the catch-all for
+   Tables, and was labelled a side table — so the designer put a meeting table
+   in a living room as the coffee table. */
+const API = process.env.STUDIO_URL ?? "http://localhost:3000";
+
+async function tagsFromPhoto(r) {
+  const res = await fetch(`${API}/api/ai/tag-product`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: r.name,
+      category: r.category,
+      widthCm: r.widthCm,
+      depthCm: r.depthCm,
+      heightCm: r.heightCm,
+      mount: r.mount,
+      thumbnailUrl: r.thumbnailUrl,
+    }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const { tags } = await res.json();
+  return Array.isArray(tags) && tags.length ? tags : null;
+}
+
+/* --only="Name A,Name B" re-tags just those pieces, so a prompt correction can
+   be checked against the handful it was meant to fix without paying for 105
+   vision calls again. */
+const onlyArg = process.argv.find((a) => a.startsWith("--only="));
+const only = onlyArg ? onlyArg.slice(7).split(",").map((n) => n.trim().toLowerCase()).filter(Boolean) : null;
+
+let rows = (await db.execute(
+  "SELECT id, name, category, mount, widthCm, depthCm, heightCm, thumbnailUrl FROM Product",
+)).rows;
+if (only) rows = rows.filter((r) => only.includes(String(r.name).toLowerCase()));
 let tagged = 0;
 const preview = [];
+let fromPhoto = 0;
 for (const r of rows) {
   const name = String(r.name);
-  let tags = RULES.find(([re]) => re.test(name))?.[1] ?? FALLBACK[String(r.category)] ?? ["role:decor"];
+  let tags = null;
+  try {
+    tags = await tagsFromPhoto(r);
+    if (tags) fromPhoto++;
+  } catch {
+    tags = null; // fall back to the name rules below
+  }
+  if (!tags) {
+    tags = RULES.find(([re]) => re.test(name))?.[1] ?? FALLBACK[String(r.category)] ?? ["role:decor"];
+  }
   tags = [...tags];
   // A ceiling mount always wins over whatever the name suggested.
   if (String(r.mount) === "ceiling" && !tags.includes("place:ceiling")) {
@@ -100,5 +145,5 @@ for (const r of rows) {
   tagged++;
 }
 console.log(preview.join("\n"));
-console.log(`\n${tagged} products ${APPLY ? "tagged" : "would be tagged"}.`);
+console.log(`\n${tagged} products ${APPLY ? "tagged" : "would be tagged"} — ${fromPhoto} read from their photo, ${tagged - fromPhoto} from name rules.`);
 if (!APPLY) console.log("Dry run — pass --apply to write.");
