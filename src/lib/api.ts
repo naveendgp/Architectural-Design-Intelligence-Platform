@@ -251,6 +251,15 @@ export const api = {
       "POST",
       { productId },
     ).then((r) => r.placement),
+  /** What is this message asking for? Text-only and cheap; the chat falls back
+      to its own keyword rules if it fails. */
+  classifyIntent: (message: string, canRevert: boolean) =>
+    send<{ action: "design" | "surfaces" | "revert" | "add" | "other"; item?: string }>(
+      "/api/ai/intent",
+      "POST",
+      { message, canRevert },
+    ),
+
   /** Arrange a whole set at once. Spots are a proposal — the caller grounds,
       pairs and collision-checks them before anything is placed. */
   layout: (body: {

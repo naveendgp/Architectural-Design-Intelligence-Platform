@@ -8,6 +8,95 @@ const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODE
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
+/* Text-only sibling of generateJson, for questions that don't need to see the
+   room. Classifying what a message is asking for is one of those: it costs a
+   fraction of a vision call and comes back fast enough to sit in front of the
+   routing. */
+async function generateJsonText(
+  prompt: string,
+  schema: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
+
+  const res = await fetch(ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0,
+        responseMimeType: "application/json",
+        responseSchema: schema,
+      },
+    }),
+  });
+  if (res.status === 429) throw new GeminiQuotaError("Gemini quota exceeded.");
+  if (!res.ok) throw new Error(`Gemini ${res.status}`);
+  const json = await res.json();
+  const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error("Gemini returned no content");
+  return JSON.parse(text) as Record<string, unknown>;
+}
+
+/* What is this message asking for?
+
+   Routing used to be regexes over the message, and each one eventually
+   misfired on a word buried inside a longer brief: "flooring" sent a whole
+   redesign to the photo editor, and "preserve the ORIGINAL windows" reverted
+   the room and designed nothing. A pattern can't tell the difference between a
+   word appearing and a request being made; reading the sentence can.
+
+   Cheap and text-only — no room photo — so it can sit in front of the routing
+   without adding a visible wait. */
+export type ChatIntent = {
+  action: "design" | "surfaces" | "revert" | "add" | "other";
+  /** For "add": the piece named, as the user wrote it. */
+  item?: string;
+};
+
+export async function classifyIntent(
+  message: string,
+  opts: { canRevert: boolean },
+): Promise<ChatIntent> {
+  const prompt = `Classify what this message to an interior-design assistant is asking for.
+
+MESSAGE: "${message}"
+
+Answer with ONE action:
+- "design"   — furnish or redesign the space: a goal, a style, a room to create
+               ("make it a luxury office", "transform this into a living room
+               with a sofa and a TV unit"). This is the default for anything
+               describing a space to achieve, however long.
+- "surfaces" — change the room's finishes ONLY, naming no furniture
+               ("change the wallpaper to warm beige", "make the floor marble").
+- "revert"   — undo a previous change to the room ("revert", "undo that",
+               "put the old photo back").${opts.canRevert ? "" : " The room has no edits to undo, so this is unlikely to be right."}
+- "add"      — add one specific named piece ("add the Arc Floor Lamp").
+               Put the piece's name in "item".
+- "other"    — anything not about furnishing or designing this room.
+
+Judge the REQUEST, not the vocabulary. A brief that says "preserve the original
+windows" is asking to design, not to revert. A brief that mentions flooring
+AND furniture is asking to design, not merely to change a surface.`;
+
+  const parsed = await generateJsonText(prompt, {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["design", "surfaces", "revert", "add", "other"] },
+      item: { type: "string" },
+    },
+    required: ["action"],
+  });
+
+  const action = String(parsed.action) as ChatIntent["action"];
+  const allowed = ["design", "surfaces", "revert", "add", "other"] as const;
+  return {
+    action: (allowed as readonly string[]).includes(action) ? action : "design",
+    item: typeof parsed.item === "string" && parsed.item.trim() ? parsed.item.trim() : undefined,
+  };
+}
+
 // Shared low-level call: send an image + text, ask for a typed JSON object back.
 async function generateJson(
   image: Buffer,

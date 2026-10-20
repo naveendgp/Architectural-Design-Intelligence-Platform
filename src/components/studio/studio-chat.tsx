@@ -254,8 +254,30 @@ export function StudioChat({
     setInput("");
     setExpanded(true); // any new exchange pulls the conversation back into view
 
+    /* ASK WHAT THE MESSAGE WANTS, don't guess from its words.
+
+       Routing was keyword rules, and each one eventually misfired on a word
+       buried in a longer brief: "flooring" sent a whole redesign to the photo
+       editor, and "preserve the ORIGINAL windows" reverted the room and
+       designed nothing. A pattern cannot tell a word appearing from a request
+       being made. The classifier reads the sentence; it is text-only and cheap
+       enough to sit in front of every message.
+
+       The keyword rules survive as the FALLBACK. If the classifier is down or
+       out of quota, a slightly wrong route beats a chat that does nothing. */
+    let act: "design" | "surfaces" | "revert" | "add" | "other" | null = null;
+    try {
+      const got = await api.classifyIntent(raw, !!(edited && onRevert));
+      if (got?.action) act = got.action;
+    } catch {
+      act = null; // fall through to the keyword rules below
+    }
+
+    const wantsRevert = act ? act === "revert" : isRevert(t);
+    const wantsSurfaces = act ? act === "surfaces" : isRoomEdit(t);
+
     // Revert the room to its original photo.
-    if (onRevert && isRevert(t)) {
+    if (onRevert && wantsRevert) {
       setBusy(true);
       setTyping(true);
       try {
@@ -271,7 +293,7 @@ export function StudioChat({
 
     // Room edit (wallpaper, curtains, paint, flooring…) — Gemini image editing.
     // This repaints the base photo, so confirm before spending ~20s on it.
-    if (isRoomEdit(t)) {
+    if (wantsSurfaces) {
       if (!projectId || !photoUrl || !onRoomEdited) {
         reply({ text: "I can edit the room once it's fully loaded — give it a moment and try again." });
         return;
