@@ -146,7 +146,7 @@ async function generateJson(
 export type ItemToPlace = {
   name: string;
   category: string;
-  mount: "floor" | "ceiling" | "wall";
+  mount: "floor" | "ceiling";
   widthCm: number | null;
   depthCm: number | null;
   heightCm: number | null;
@@ -154,7 +154,7 @@ export type ItemToPlace = {
 
 export type PlacedSummary = {
   name: string;
-  mount: "floor" | "ceiling" | "wall";
+  mount: "floor" | "ceiling";
   ax: number;
   ay: number;
 };
@@ -295,7 +295,7 @@ export type LayoutPiece = {
   widthCm: number | null;
   depthCm: number | null;
   heightCm: number | null;
-  mount: "floor" | "ceiling" | "wall";
+  mount: "floor" | "ceiling";
 };
 
 export type LayoutSpot = { i: number; ax: number; ay: number; facingDeg: number; note?: string };
@@ -433,7 +433,7 @@ export type CatalogEntry = {
   widthCm: number | null;
   depthCm: number | null;
   heightCm: number | null;
-  mount: "floor" | "ceiling" | "wall";
+  mount: "floor" | "ceiling";
 };
 
 export type DesignPlanItem = { productId: string; qty: number; reason: string };
@@ -1326,7 +1326,7 @@ visualiser. The input is a real photo of a room with furniture and light fixture
 composited into it. Produce ONE magazine-quality photograph of THIS room, finished to
 the standard of a high-end interior shoot.
 
-${inventory}There are two different rules for the two halves of this image.
+${inventory}There are three rules, and they do different jobs: what you must not touch, what you must re-finish, and what you must add.
 
 1. THE FURNITURE AND FIXTURES ARE SACRED — never change them.
 - CRITICAL: every piece listed above must be clearly visible in your output, in the
@@ -1337,7 +1337,9 @@ ${inventory}There are two different rules for the two halves of this image.
   position, footprint, size, orientation, silhouette, colour and material. This
   includes pre-existing real furniture AND the pieces composited into the photo.
 - Do NOT add furniture, remove furniture, swap one piece for another, move, rotate,
-  resize or recolour anything. No new decor, plants, rugs, cushions or props.
+  resize or recolour anything. Never introduce a second sofa, bed, table, chair, storage
+  unit or light fitting. Rule 3 lets you add soft furnishing and wall decor ONLY, and
+  nothing you add there may hide, overlap or crop a piece listed above.
 - Anything that reads as a rough 3D or pasted-in model must be made to look like a
   real object of THAT SAME design — real materials, believable edges, correct contact
   shadow and reflection — never replaced by a different object.
@@ -1363,6 +1365,31 @@ lit and shot it:
   accurate soft shadows and ambient occlusion. No cartoon look, no over-saturation, no
   HDR halos, no pasted-in seams.
 - The camera angle, framing and aspect ratio stay identical to the input.
+
+3. DRESS THE ROOM AROUND THE FURNITURE THAT IS ALREADY THERE.
+An unfurnished-looking room full of bare floor and empty walls is a failed result. A rug
+and a picture are what make a room look lived in, and you are the one who adds them —
+they are not modelled, they are part of the photograph you are taking. Everything you
+add must be positioned by reference to the pieces listed above, not dropped anywhere:
+- A RUG: lay one on the floor under the main grouping, aligned to the SAME axis as the
+  furniture (never skewed to the camera). Under a bed it starts part-way down the bed
+  and extends well past both sides; under seating it sits beneath the front legs and
+  spans the whole group. It must read as a textile on the floor in correct perspective —
+  the furniture standing on it partly covers it, and that occlusion is what makes it
+  believable. Never float it, never let it ride up a wall, never put one in a doorway or
+  across the main walking route.
+- ARTWORK: hang one piece, or a small balanced set, on a BLANK stretch of wall, centred
+  on the furniture directly below it (a bed headboard, a sofa) and sized to roughly
+  two-thirds of that piece's width, with its centre near standing eye level. It hangs
+  FLAT against the wall with a contact shadow. Never place art over a window, a glazed
+  door, a mirror, a curtain or an opening, and never let it overlap the ceiling — if the
+  wall behind the main piece is glass or fully curtained, use a different blank wall, or
+  skip the art entirely rather than covering the view.
+- MODEST DECOR: a few cushions and a throw on the seating or bed, something small on a
+  side or coffee table, and at most one plant in a genuinely empty corner. Restraint —
+  this is a styled shoot, not a cluttered one. No clutter on the floor.
+- Everything you add takes its colours from the room's own palette and from the placed
+  furniture, so the result reads as one scheme. The furniture stays the hero.
 
 ${lightingClause}
 

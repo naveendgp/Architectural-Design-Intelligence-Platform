@@ -41,7 +41,6 @@ import type { Calibration } from "@/lib/placement";
 import {
   ceilingAnchor,
   itemAnchor,
-  planeFor,
   findFreeAnchor,
   anchorOverlaps,
   type FootprintSpec,
@@ -357,17 +356,7 @@ function Studio() {
   useEffect(() => {
     api
       .products()
-      /* Flat goods have no mesh by design — they render from their photo. */
-      .then((p) =>
-        setProducts(
-          p.filter(
-            (x) =>
-              x.modelUrl ||
-              (x.aiTags ?? []).includes("role:rug") ||
-              (x.aiTags ?? []).includes("role:wall-art"),
-          ),
-        ),
-      )
+      .then((p) => setProducts(p.filter((x) => x.modelUrl)))
       .catch(() => {});
   }, []);
 
@@ -443,7 +432,7 @@ function Studio() {
     async (productId: string) => {
       if (!projectId) return { ok: false as const, reason: "not-ready" as const };
       const product = products.find((p) => p.id === productId);
-      const mount: "floor" | "ceiling" | "wall" = product?.mount === "ceiling" ? "ceiling" : "floor";
+      const mount: "floor" | "ceiling" = product?.mount === "ceiling" ? "ceiling" : "floor";
       const ceiling = mount === "ceiling";
       const aspect = stage.w / Math.max(1, stage.h);
       const region = ceiling ? CEILING_ANCHOR_BAND : floorRegion();
@@ -543,7 +532,7 @@ function Studio() {
                 },
                 placed: items.map((it) => {
                   const a = itemAnchor(it);
-                  return { name: it.product.name, mount: planeFor(it.product.mount), ax: a.ax, ay: a.ay };
+                  return { name: it.product.name, mount: it.product.mount, ax: a.ax, ay: a.ay };
                 }),
               }),
               new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout")), 25000)),
@@ -696,10 +685,7 @@ function Studio() {
 
         let seatedCount = 0;
         for (let i = 0; i < entry.qty; i++) {
-          /* Rugs are excluded: furniture is MEANT to stand on them. */
-        const samePlane = working.filter(
-          (it) => (it.product.mount === "ceiling") === ceiling && !isRug(it.product),
-        );
+          const samePlane = working.filter((it) => (it.product.mount === "ceiling") === ceiling);
           const free =
             findFreeAnchor(fallback.posX, fallback.posZ, spec, samePlane, aspect, calib, depth, region, obstacles) ??
             findFreeAnchor(fallback.posX, fallback.posZ, spec, samePlane, aspect, calib, depth, region, []);
@@ -785,13 +771,6 @@ const isSeat = (p: ProductDTO) =>
    is the single clearest sign nobody composed the room. */
 const FOCAL_ROLES = ["role:bed", "role:sofa", "role:dining-table", "role:desk", "role:meeting-table"];
 const isFocalPiece = (p: ProductDTO) => FOCAL_ROLES.some((t) => hasTag(p, t));
-
-/* A rug lies UNDER the furniture, so it must be invisible to the packer.
-   Treating it as an obstacle would shove the bed off the very rug chosen to sit
-   beneath it. */
-const isRug = (p: ProductDTO) => hasTag(p, "role:rug");
-/** Hung on a wall — a picture or mirror. */
-const isWallArt = (p: ProductDTO) => p.mount === "wall";
 
   const addFurnitureBatch = useCallback(
     async (entries: { productId: string; qty: number }[]) => {
@@ -975,24 +954,6 @@ const isWallArt = (p: ProductDTO) => p.mount === "wall";
           const surf = findSurface()!;
           start = { ax: Math.min(0.96, surf.ax + 0.08), ay: surf.ay };
           liftM = surf.topM;
-          facing = 0;
-        } else if (isRug(product)) {
-          /* Centred under what the room is built around, pushed a little toward
-             the camera so it reads as lying in front of the piece rather than
-             hidden behind it. */
-          const focal = findFocalAnchor();
-          start = focal
-            ? { ax: focal.ax, ay: Math.min(autoFloor.maxY, focal.ay + 0.06) }
-            : { ax: proposed?.ax ?? 0.5, ay: proposed?.ay ?? (autoFloor.minY + autoFloor.maxY) / 2 };
-          facing = 0;
-        } else if (isWallArt(product)) {
-          /* On the wall behind the focal piece, at eye level. The anchor is the
-             floor point beneath it; liftM raises it to hanging height. */
-          const focal = findFocalAnchor();
-          start = focal
-            ? { ax: focal.ax, ay: Math.max(autoFloor.minY, focal.ay - 0.04) }
-            : { ax: proposed?.ax ?? 0.5, ay: autoFloor.minY + 0.02 };
-          liftM = 1.15; // bottom of the frame, a little above a headboard
           facing = 0;
         } else if (isCompanionTable(product) && findSeatAnchor()) {
           /* Within reach of the seat it serves. Left to the free-space search a
@@ -1189,9 +1150,7 @@ const isWallArt = (p: ProductDTO) => p.mount === "wall";
           yawDeg: (it.product.frontYaw ?? 0) + (depth?.roomYawDeg ?? 0) + (sp?.facingDeg ?? it.rotationY),
           mount: ceiling ? "ceiling" : "floor",
         };
-        const samePlane = working.filter(
-          (w) => (w.product.mount === "ceiling") === ceiling && !isRug(w.product),
-        );
+        const samePlane = working.filter((w) => (w.product.mount === "ceiling") === ceiling);
         const region = ceiling ? CEILING_ANCHOR_BAND : autoFloor;
         const start = sp
           ? ceiling

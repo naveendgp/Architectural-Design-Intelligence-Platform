@@ -2,7 +2,7 @@
 
 import { Suspense, Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
-import { useGLTF, useTexture, Clone, Environment, Shadow } from "@react-three/drei";
+import { useGLTF, Clone, Environment, Shadow } from "@react-three/drei";
 import * as THREE from "three";
 import type { PlacedItemDTO } from "@/lib/types";
 import type { DepthField } from "@/lib/depth";
@@ -61,75 +61,6 @@ function CameraRig({ fov, horizonY }: { fov: number; horizonY: number }) {
 }
 
 type Registry = React.MutableRefObject<Map<string, THREE.Object3D>>;
-
-/* Flat goods — a rug, a framed picture — are an IMAGE, not a mesh.
-
-   Modelling them would be waste: a rug is a rectangle on the floor and a canvas
-   is a rectangle on a wall, and both are sold as a printed image anyway. They
-   render as a textured plane at their real size, which is also why they need no
-   GLB: the product photo IS the product.
-
-   A rug is deliberately invisible to the collision packer. Furniture is MEANT
-   to stand on it; treating it as an obstacle would push the bed off the rug it
-   was chosen to sit under. */
-function FlatItem({
-  item,
-  selected,
-  aspect,
-  calib,
-  registry,
-}: {
-  item: PlacedItemDTO;
-  selected: boolean;
-  aspect: number;
-  calib: Calibration;
-  registry: Registry;
-}) {
-  const texture = useTexture(item.product.thumbnailUrl);
-  const onWall = item.product.mount === "wall";
-  const pos = itemWorldPos(item, aspect, calib);
-
-  const w = ((item.product.widthCm ?? 100) / 100) * item.scale * calib.scale;
-  const h = ((item.product.heightCm ?? 100) / 100) * item.scale * calib.scale;
-  const d = ((item.product.depthCm ?? 100) / 100) * item.scale * calib.scale;
-
-  const group = useRef<THREE.Group>(null);
-  useEffect(() => {
-    const node = group.current;
-    if (!node) return;
-    node.userData.anchor = itemAnchor(item);
-    node.userData.mount = item.product.mount;
-    registry.current.set(item.id, node);
-    return () => {
-      registry.current.delete(item.id);
-    };
-  }, [item, registry]);
-
-  return (
-    <group ref={group} position={[pos.x, pos.y, pos.z]} rotation={[0, (item.rotationY * Math.PI) / 180, 0]}>
-      {onWall ? (
-        /* Hung on a wall: upright, facing the room. */
-        <mesh position={[0, h / 2, 0]}>
-          <planeGeometry args={[w, h]} />
-          <meshBasicMaterial map={texture} toneMapped={false} transparent />
-        </mesh>
-      ) : (
-        /* Lying on the floor. Lifted a millimetre so it does not z-fight with
-           the photo, and rendered first so furniture always draws on top. */
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]} renderOrder={-1}>
-          <planeGeometry args={[w, d]} />
-          <meshBasicMaterial map={texture} toneMapped={false} transparent depthWrite={false} />
-        </mesh>
-      )}
-      {selected && (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.003, 0]}>
-          <ringGeometry args={[Math.max(w, d) / 2, Math.max(w, d) / 2 + 0.04, 64]} />
-          <meshBasicMaterial color="#6366f1" transparent opacity={0.9} />
-        </mesh>
-      )}
-    </group>
-  );
-}
 
 function Furniture({
   item,
@@ -438,16 +369,7 @@ function CollisionChecker({
        that plainly have a gap. Placement still reserves the full box; only this
        warning is inset. */
     const INSET = 0.88;
-    /* Only things that can actually clash. A rug is MEANT to have furniture
-       standing on it, and a picture hangs on a wall above everything — counting
-       either as an obstacle painted a red collision ring under a perfectly
-       placed bed. */
-    const floor = items.filter(
-      (it) =>
-        it.product.mount === "floor" &&
-        it.product.modelUrl !== null &&
-        !(it.product.aiTags ?? []).includes("role:rug"),
-    );
+    const floor = items.filter((it) => it.product.mount !== "ceiling");
     const boxes = floor.map((it) => {
       const o = itemOBB(it, aspect, calib, depth);
       return [it.id, { ...o, hw: o.hw * INSET, hd: o.hd * INSET }] as const;
@@ -621,23 +543,6 @@ function SceneContent({
             kind={kind}
           />
         );
-        /* A rug or a picture is an image, not a mesh — it has no GLB to load. */
-        if (!it.product.modelUrl) {
-          return (
-            <ModelErrorBoundary key={it.id} fallback={placeholder("error")}>
-              <Suspense fallback={placeholder("loading")}>
-                <FlatItem
-                  item={it}
-                  selected={it.id === selectedId}
-                  aspect={aspect}
-                  calib={calib}
-                  registry={registry}
-                />
-              </Suspense>
-            </ModelErrorBoundary>
-          );
-        }
-
         return (
           <ModelErrorBoundary key={it.id} fallback={placeholder("error")}>
             <Suspense fallback={placeholder("loading")}>
