@@ -335,10 +335,25 @@ FOR EACH PIECE return:
 COMPOSE IT LIKE A ROOM, NOT A WAREHOUSE:
 - ANCHOR FIRST. The largest piece — the desk, sofa or bed — goes against the
   most sensible wall for its purpose, square to that wall, and everything else
-  is arranged around it.
+  is arranged around it. That wall becomes the room's FOCAL WALL.
 - AGAINST A WALL MEANS AGAINST IT. A sofa, desk, bed, wardrobe or storage unit
   sits with its back to a wall, facing INTO the room. Do not leave a wall piece
   stranded in open floor.
+- USE EVERY WALL, NOT ONE. A room has a back wall and two side walls; furniture
+  lined up along a single one reads as a showroom rather than a room. Once the
+  anchor has its focal wall, the other wall pieces go on the OTHER walls — and
+  a wardrobe or tall storage belongs on a side wall, not crowding the focal one.
+  Judge from the photo which walls this room actually has.
+- DON'T LEAVE THE FOREGROUND EMPTY. A room furnished only along the far wall
+  looks like a corridor with a bed in it. Bring at least one piece — a chair, a
+  low table, a bench — into the nearer half of the floor so the room has depth.
+- SERVE THE SEATING. A side or coffee table goes WITHIN REACH of the chair or
+  sofa it belongs to, a stride away at most, never alone in open floor. A floor
+  lamp stands at that group's outer corner.
+- HANG THE LIGHT OVER SOMETHING. A pendant or chandelier centres on what the
+  room is FOR — over the bed, the dining table, the seating group — not on the
+  geometric middle of the floor. If the anchor sits against the left wall, the
+  pendant moves with it.
 - GROUP WHAT BELONGS TOGETHER. A desk and its chair are one group: the chair
   goes BEHIND the desk (further from the camera) facing the camera across it.
   Dining chairs are spaced evenly around their table, each turned to face it.
@@ -667,6 +682,14 @@ RULES:
     - Include WINDOW TREATMENTS where the windows are bare or the existing
       curtains are dated — well-made drapes or sheers in keeping with the
       direction. A bare window is one of the strongest "unfinished room" signals.
+    - DRESS THE ROOM, don't just resurface it. A finished room has more than
+      paint: name a RUG sized to the main furniture group, ARTWORK or a mirror on
+      the largest blank wall, and a PLANT where a corner is dead. These are
+      finishes, not furniture, so they belong in this instruction — the furniture
+      itself arrives separately as 3D models and you must never name any.
+      Say where each one goes ("a large wool rug under the bed", "one large
+      abstract canvas centred on the wall behind the bed"), and keep the middle
+      of the floor clear for the furniture to come.
     - Do NOT ask to remove or alter anything the user might want kept, such as
       windows, doors, or built-in structure.
     - reason: at most 12 words naming the MATERIALS that define this direction
@@ -1243,12 +1266,17 @@ export async function editRoomImage(
 room. Apply EXACTLY the following change(s) to it, and nothing else: "${instruction}".
 
 STRICT RULES — do not hallucinate:
-- NEVER ADD FURNITURE. This photo is the empty shell a room is designed on: the
-  desks, chairs, sofas, tables and lamps are placed afterwards as real 3D models
-  from a catalogue, and anything you paint in here cannot be moved, priced or
-  removed by the user. Even if the instruction mentions furniture, lighting or
-  decor, change only the SURFACES it names — floor, walls, ceiling, window
-  treatment — and leave the furnishing to the models.
+- NEVER PAINT FURNITURE. Beds, sofas, chairs, desks, tables, storage and lamps
+  are placed afterwards as real 3D models from a catalogue; anything you paint
+  in cannot be moved, priced or removed, and it will collide with the model that
+  arrives later. Leave every one of those out, however the instruction is worded.
+- DO render what is FIXED TO A SURFACE when the instruction asks for it: a rug
+  lying on the floor, artwork or a mirror hung on a wall, long drapery, a potted
+  plant standing in a corner, books or a vase on a built-in ledge. These are part
+  of the room's finish rather than its furniture — nobody drags a rug around or
+  prices it per piece — and a room without them reads as unfinished no matter how
+  well the walls are done. Keep them clear of the middle of the floor, which is
+  where the furniture will go.
 - Do ONLY what the instruction literally says. Where it lists several changes, make
   every one of them — but still nothing beyond them. Do NOT add, invent, or introduce
   any new object, furniture, decor, plant, rug, lamp, artwork, or texture that the

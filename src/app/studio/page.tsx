@@ -758,6 +758,20 @@ const isAnchorPiece = (p: ProductDTO) =>
 /** Belongs ON a desk or table, so it has no business being seated on the floor. */
 const needsSurface = (p: ProductDTO) => hasTag(p, "place:on-surface");
 
+/** A small table that exists to serve a seat — it belongs within reach of one. */
+const isCompanionTable = (p: ProductDTO) =>
+  hasTag(p, "role:side-table") || hasTag(p, "role:coffee-table");
+
+/** Something to sit on, that such a table would serve. */
+const isSeat = (p: ProductDTO) =>
+  hasTag(p, "role:sofa") || hasTag(p, "role:lounge-chair") || hasTag(p, "role:bed");
+
+/* What the room is FOR. A pendant belongs over this, not over the middle of the
+   floor — a light centred on empty floor while the bed sits against a side wall
+   is the single clearest sign nobody composed the room. */
+const FOCAL_ROLES = ["role:bed", "role:sofa", "role:dining-table", "role:desk", "role:meeting-table"];
+const isFocalPiece = (p: ProductDTO) => FOCAL_ROLES.some((t) => hasTag(p, t));
+
   const addFurnitureBatch = useCallback(
     async (entries: { productId: string; qty: number }[]) => {
       if (!projectId) return { added: 0, skipped: [] as string[] };
@@ -834,6 +848,31 @@ const needsSurface = (p: ProductDTO) => hasTag(p, "place:on-surface");
 
       /* The desk a seat should be tucked into: one placed earlier in this batch
          if there is one, otherwise one already standing in the room. */
+      /* Where the room's focal piece ended up, so a hanging light can centre on
+         it rather than on the middle of the floor. */
+      const findFocalAnchor = (): { ax: number; ay: number } | null => {
+        for (const [pid, at] of seatedAt) {
+          const prod = products.find((x) => x.id === pid);
+          if (prod && isFocalPiece(prod)) return at;
+        }
+        const standing = working.find(
+          (it) => it.product.mount !== "ceiling" && isFocalPiece(it.product),
+        );
+        return standing ? itemAnchor(standing) : null;
+      };
+
+      /** The seat a companion table should be placed beside. */
+      const findSeatAnchor = (): { ax: number; ay: number } | null => {
+        for (const [pid, at] of seatedAt) {
+          const prod = products.find((x) => x.id === pid);
+          if (prod && isSeat(prod) && !hasTag(prod, "role:bed")) return at;
+        }
+        const standing = working.find(
+          (it) => it.product.mount !== "ceiling" && isSeat(it.product) && !hasTag(it.product, "role:bed"),
+        );
+        return standing ? itemAnchor(standing) : null;
+      };
+
       /* A surface something can STAND on, with its height, so a desk lamp can be
          put at desk height instead of on the floor beside it. */
       const findSurface = (): { ax: number; ay: number; topM: number } | null => {
@@ -881,9 +920,14 @@ const needsSurface = (p: ProductDTO) => hasTag(p, "place:on-surface");
         let liftM = 0; // metres above the floor; non-zero only for on-surface pieces
         if (ceiling) {
           const n = samePlane.length;
-          start = proposed
-            ? ceilingAnchor(proposed.ax, proposed.ay)
-            : ceilingAnchor(n === 0 ? 0.5 : 0.5 + (n % 2 === 1 ? 0.18 : -0.18) * Math.ceil(n / 2), CEILING_FALLBACK.posZ);
+          const focal = findFocalAnchor();
+          /* Hang it over what the room is for. The layout's own suggestion is
+             used only when there is nothing to centre on. */
+          start = focal
+            ? ceilingAnchor(focal.ax, proposed?.ay ?? CEILING_FALLBACK.posZ)
+            : proposed
+              ? ceilingAnchor(proposed.ax, proposed.ay)
+              : ceilingAnchor(n === 0 ? 0.5 : 0.5 + (n % 2 === 1 ? 0.18 : -0.18) * Math.ceil(n / 2), CEILING_FALLBACK.posZ);
         } else if (isDeskSeat(product) && findDeskAnchor()) {
           /* You sit BEHIND a desk, not in front of it. "Behind" here means
              further from the camera — a smaller ay — so the search is capped at
@@ -911,6 +955,17 @@ const needsSurface = (p: ProductDTO) => hasTag(p, "place:on-surface");
           start = { ax: Math.min(0.96, surf.ax + 0.08), ay: surf.ay };
           liftM = surf.topM;
           facing = 0;
+        } else if (isCompanionTable(product) && findSeatAnchor()) {
+          /* Within reach of the seat it serves. Left to the free-space search a
+             side table ends up marooned in open floor, which is exactly how the
+             drum table ended up alone in the middle of a bedroom. */
+          const seat = findSeatAnchor()!;
+          const side = seat.ax < 0.5 ? 0.1 : -0.1; // step toward the room, not the wall
+          start = {
+            ax: clampAnchor(seat.ax + side),
+            ay: Math.min(autoFloor.maxY, Math.max(autoFloor.minY, seat.ay + 0.015)),
+          };
+          facing = proposed?.facingDeg ?? 0;
         } else if (proposed) {
           /* The composed position, held to the band the engine will seat in.
              Facing comes from the layout too — this is the only thing that ever
