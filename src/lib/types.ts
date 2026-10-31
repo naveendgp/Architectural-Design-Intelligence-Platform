@@ -29,7 +29,9 @@ export type ProductDTO = {
   thumbnailUrl: string;
   modelUrl: string | null;
   frontYaw: number; // yaw (°) that makes the model's front face the camera
-  mount: "floor" | "ceiling"; // where the piece attaches
+  /* Where the piece attaches. "wall" is for flat goods hung on one — a framed
+     picture or mirror — which render as a textured plane rather than a mesh. */
+  mount: "floor" | "ceiling" | "wall";
   createdAt: string;
 };
 

@@ -203,13 +203,21 @@ export function pointToAnchor(
   };
 }
 
+/* Which physical plane a mount sits on. A wall-hung picture is anchored at the
+   FLOOR point beneath it and then lifted to hanging height by posY — that keeps
+   one depth model for everything instead of inventing a third plane, and the
+   anchor stays something the packer and the drag handler already understand. */
+export function planeFor(mount: "floor" | "ceiling" | "wall"): "floor" | "ceiling" {
+  return mount === "ceiling" ? "ceiling" : "floor";
+}
+
 /** Normalized screen anchor of a placed item's base, snapped onto the real floor /
     ceiling surface (from scene calibration) so it renders grounded, not floating.
     Applies to existing placements too, so reopening a project auto-corrects them. */
 export function itemAnchor(item: PlacedItemDTO): { ax: number; ay: number } {
   const ax = inRange(item.posX) ? item.posX : FALLBACK_ANCHOR.ax;
   const ay = inRange(item.posZ) ? item.posZ : FALLBACK_ANCHOR.ay;
-  return groundAnchor(ax, ay, item.product.mount);
+  return groundAnchor(ax, ay, planeFor(item.product.mount));
 }
 
 /** World position of a placed item's base.
@@ -223,7 +231,7 @@ export function itemWorldPos(
   _depth?: DepthField | null,
 ): THREE.Vector3 {
   const { ax, ay } = itemAnchor(item);
-  const p = anchorToPoint(ax, ay, aspect, calib, item.product.mount);
+  const p = anchorToPoint(ax, ay, aspect, calib, planeFor(item.product.mount));
   /* posY lifts a piece off the floor, in metres. It is how something that
      belongs ON a surface — a desk lamp — stands at desk height instead of on
      the carpet beside it. Zero for everything that sits on the floor. */
@@ -331,7 +339,7 @@ export function obbOverlap(a: OBB, b: OBB): boolean {
 /** OBB footprint of a placed item, oriented by its full render yaw. */
 export function itemOBB(item: PlacedItemDTO, aspect: number, calib: Calibration, depth: DepthField | null): OBB {
   const { ax, ay } = itemAnchor(item);
-  const { x, z } = groundXZ(ax, ay, item.product.mount, aspect, calib);
+  const { x, z } = groundXZ(ax, ay, planeFor(item.product.mount), aspect, calib);
   const { hw, hd } = halfExtents(item.product.widthCm, item.product.depthCm, item.scale, calib);
   const angle = ((item.product.frontYaw + (depth?.roomYawDeg ?? 0) + item.rotationY) * Math.PI) / 180;
   return { cx: x, cz: z, hw, hd, angle };
@@ -544,7 +552,7 @@ export function itemSpec(item: PlacedItemDTO, depth: DepthField | null): Footpri
     depthCm: item.product.depthCm,
     scale: item.scale,
     yawDeg: item.product.frontYaw + (depth?.roomYawDeg ?? 0) + item.rotationY,
-    mount: item.product.mount,
+    mount: planeFor(item.product.mount),
   };
 }
 

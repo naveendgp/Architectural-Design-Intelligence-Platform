@@ -48,7 +48,11 @@ function toProductDTO(r: Row): ProductDTO {
     thumbnailUrl: str(r.thumbnailUrl),
     modelUrl: strOrNull(r.modelUrl),
     frontYaw: num(r.frontYaw),
-    mount: (str(r.mount) === "ceiling" ? "ceiling" : "floor") as ProductDTO["mount"],
+    /* "wall" must survive: a framed picture hung on one renders as an upright
+       plane, and flattening it to "floor" laid the canvas down on the carpet. */
+    mount: (["ceiling", "wall"].includes(str(r.mount))
+      ? str(r.mount)
+      : "floor") as ProductDTO["mount"],
     createdAt: str(r.createdAt),
   };
 }
@@ -95,7 +99,7 @@ export async function createProduct(input: {
   sourceVideoUrl?: string;
   meshyTaskId?: string;
   frontYaw?: number;
-  mount?: "floor" | "ceiling";
+  mount?: "floor" | "ceiling" | "wall";
 }): Promise<ProductDTO> {
   await ensureDb();
   const id = randomUUID();

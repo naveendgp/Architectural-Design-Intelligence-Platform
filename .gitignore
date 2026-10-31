@@ -12,3 +12,6 @@ tsconfig.tsbuildinfo
 # Source images for preview catalogue listings — synced to the server like /storage
 /Furniture
 /Furniture 2
+
+# Flat-good source images (rugs, art) — synced like /storage
+/Flat

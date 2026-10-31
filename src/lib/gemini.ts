@@ -146,7 +146,7 @@ async function generateJson(
 export type ItemToPlace = {
   name: string;
   category: string;
-  mount: "floor" | "ceiling";
+  mount: "floor" | "ceiling" | "wall";
   widthCm: number | null;
   depthCm: number | null;
   heightCm: number | null;
@@ -154,7 +154,7 @@ export type ItemToPlace = {
 
 export type PlacedSummary = {
   name: string;
-  mount: "floor" | "ceiling";
+  mount: "floor" | "ceiling" | "wall";
   ax: number;
   ay: number;
 };
@@ -295,7 +295,7 @@ export type LayoutPiece = {
   widthCm: number | null;
   depthCm: number | null;
   heightCm: number | null;
-  mount: "floor" | "ceiling";
+  mount: "floor" | "ceiling" | "wall";
 };
 
 export type LayoutSpot = { i: number; ax: number; ay: number; facingDeg: number; note?: string };
@@ -433,7 +433,7 @@ export type CatalogEntry = {
   widthCm: number | null;
   depthCm: number | null;
   heightCm: number | null;
-  mount: "floor" | "ceiling";
+  mount: "floor" | "ceiling" | "wall";
 };
 
 export type DesignPlanItem = { productId: string; qty: number; reason: string };

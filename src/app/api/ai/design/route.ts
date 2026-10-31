@@ -44,8 +44,15 @@ export async function POST(req: Request) {
      which is exactly what made a finished room look like a pile of unrelated
      objects. A listing is still browsable in the marketplace; it just isn't
      something the AI may design with until its real model lands. */
+  /* Placeable means the room can actually receive it. That is a 3D model for
+     furniture — but a rug or a framed picture has no mesh and never will: it
+     renders as a textured plane from its own photo. Requiring a modelUrl hid
+     every rug from the designer, which then reported rugs as unstocked while
+     one sat in the catalogue. */
+  const isFlatGood = (p: { aiTags: string[] }) =>
+    p.aiTags.includes("role:rug") || p.aiTags.includes("role:wall-art");
   const products = (await listProducts()).filter(
-    (p) => p.modelUrl && p.status === "READY",
+    (p) => p.status === "READY" && (p.modelUrl || isFlatGood(p)),
   );
   if (products.length === 0) {
     return Response.json({ error: "catalog is empty", code: "empty" }, { status: 409 });
