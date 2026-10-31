@@ -735,12 +735,19 @@ export function StudioChat({
       }
 
       const totalInr = items.reduce((n, l) => n + l.subtotalInr, 0);
+      /* Say what the marketplace could not supply. A brief that asked for a rug
+         and a calm palette came back with neither a rug nor an explanation, and
+         the room just looked unfinished for no stated reason. */
+      const missing = (plan as { unavailable?: string[] }).unavailable ?? [];
+      const note = missing.length
+        ? `${plan.reply}\n\nI couldn't add ${missing.join(", ")} — there's nothing like that in your marketplace yet.`
+        : plan.reply;
       setMessages((m) => [
         ...m,
         {
           id: nextId(),
           role: "ai",
-          text: plan.reply,
+          text: note,
           plan: {
             intent: plan.intent,
             budgetInr: plan.budgetInr,

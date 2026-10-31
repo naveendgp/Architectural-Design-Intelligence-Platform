@@ -431,6 +431,8 @@ export type DesignPlan = {
   items: DesignPlanItem[];
   /** Budget parsed out of the request, in rupees; 0 when none was given. */
   budgetInr: number;
+  /** Asked for, but not stocked — told to the user instead of silently dropped. */
+  unavailable: string[];
   /** True when the request wasn't about furniture at all (chat falls back). */
   offTopic: boolean;
   /** Removing the room's existing dated furniture, when the photo has some. Kept
@@ -564,6 +566,17 @@ RULES:
 - Choose real ids from the catalog above. Never invent an id or a product name.
 - Match the STYLE the user asked for (modern, classical, luxury, minimal) using
   each product's style tags, and match the room you can see in the photo.
+- MATCH THE PALETTE. Each catalog line carries a tone: — light, warm-neutral,
+  dark or bold. A brief asking for calm, serene, soft, neutral or minimal takes
+  light and warm-neutral pieces; dark ones break it. "A pop of colour" means ONE
+  bold piece against that calm ground, not several. A dark leather recliner
+  answered a "calm palette" brief once and ruined the room — check the tone of
+  every piece you choose against the words the user actually used.
+- SAY WHAT YOU COULD NOT DO. If the brief asks for something the catalog simply
+  does not stock — a rug, artwork, plants, cushions — list those words in
+  "unavailable". Do NOT substitute something else for them and do not pass over
+  it in silence: the user asked, and deserves to know the marketplace is missing
+  it rather than wondering why their room looks bare.
 - Respect the SPACE above all. Keep the combined footprint within the cap and
   leave walking room. Under-filling is fine; overcrowding is not.
 - BUDGET: only when the request names one (e.g. "under 5 lakhs", "₹2L", "50k") —
@@ -688,6 +701,11 @@ RULES:
       intent: { type: "string" },
       reply: { type: "string" },
       budgetInr: { type: "number", description: "rupees, 0 if not specified" },
+      unavailable: {
+        type: "array",
+        description: "Things the brief asked for that the catalog does not stock.",
+        items: { type: "string" },
+      },
       offTopic: { type: "boolean" },
       clearInstruction: { type: "string" },
       surfaceOptions: {
@@ -758,6 +776,9 @@ RULES:
     reply: typeof parsed.reply === "string" ? parsed.reply : "",
     items,
     budgetInr: Math.max(0, Math.round(Number(parsed.budgetInr) || 0)),
+    unavailable: Array.isArray(parsed.unavailable)
+      ? (parsed.unavailable as unknown[]).map(String).filter(Boolean).slice(0, 6)
+      : [],
     offTopic: parsed.offTopic === true,
   };
 }
@@ -891,8 +912,18 @@ place — exactly ONE: wall (its back belongs against one), free (it stands in
 pairs — what it belongs with, if anything: desk, task-chair, dining-table,
   dining-chair, sofa, bed.
 
+tone — the piece's VISUAL WEIGHT in a room, exactly ONE, read off the photo:
+  light (white, cream, pale wood, beige), warm-neutral (oat, taupe, mid oak),
+  dark (charcoal, espresso, black, dark leather), bold (a saturated colour that
+  reads as an accent). A brief asking for a calm palette must not be answered
+  with a dark piece, and this is the only thing that tells us which is which.
+
+material — the dominant one, exactly ONE: fabric, boucle, leather, wood,
+  metal, stone, glass, rattan.
+
 Return them as a flat list of strings, each prefixed with its kind, e.g.
-["role:coffee-table","room:living","place:beside-seating","pairs:sofa"].`;
+["role:coffee-table","room:living","place:beside-seating","pairs:sofa",
+ "tone:warm-neutral","material:wood"].`;
 
   const parsed = await generateJson(image, mimeType, prompt, {
     type: "object",
@@ -901,7 +932,7 @@ Return them as a flat list of strings, each prefixed with its kind, e.g.
   });
 
   const raw = Array.isArray(parsed.tags) ? (parsed.tags as unknown[]) : [];
-  const ok = /^(role|room|place|pairs):[a-z-]+$/;
+  const ok = /^(role|room|place|pairs|tone|material):[a-z-]+$/;
   const tags = raw.map(String).map((t) => t.trim()).filter((t) => ok.test(t));
   // A piece with no role is worse than useless — it would match nothing.
   return tags.some((t) => t.startsWith("role:")) ? [...new Set(tags)] : [];

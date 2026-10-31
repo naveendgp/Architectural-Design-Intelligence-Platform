@@ -120,15 +120,34 @@ let rows = (await db.execute(
 if (only) rows = rows.filter((r) => only.includes(String(r.name).toLowerCase()));
 let tagged = 0;
 const preview = [];
+/* Stop rather than silently degrade.
+
+   The name rules are a per-product fallback for one bad photo, NOT a stand-in
+   for the classifier being unreachable. With the dev server down, every call
+   failed, all 105 quietly fell back, and a run that printed "105 products
+   tagged" had actually REPLACED good photo-based tags with worse name-based
+   ones. A run that cannot reach the classifier must fail loudly. */
 let fromPhoto = 0;
+let failures = 0;
+const FAIL_LIMIT = 5;
+
 for (const r of rows) {
   const name = String(r.name);
   let tags = null;
   try {
     tags = await tagsFromPhoto(r);
     if (tags) fromPhoto++;
-  } catch {
-    tags = null; // fall back to the name rules below
+  } catch (err) {
+    failures++;
+    if (failures >= FAIL_LIMIT && fromPhoto === 0) {
+      console.error(
+        `\nAborting: ${failures} classifier calls failed and none succeeded.` +
+          `\nLast error: ${err.message}` +
+          `\nIs the app running at ${API}? Nothing has been overwritten beyond the first ${fromPhoto} products.`,
+      );
+      process.exit(1);
+    }
+    tags = null; // one bad photo — fall back to the name rules for this product
   }
   if (!tags) {
     tags = RULES.find(([re]) => re.test(name))?.[1] ?? FALLBACK[String(r.category)] ?? ["role:decor"];
@@ -146,4 +165,7 @@ for (const r of rows) {
 }
 console.log(preview.join("\n"));
 console.log(`\n${tagged} products ${APPLY ? "tagged" : "would be tagged"} — ${fromPhoto} read from their photo, ${tagged - fromPhoto} from name rules.`);
+if (fromPhoto < tagged) {
+  console.warn(`WARNING: ${tagged - fromPhoto} fell back to name rules — those carry no tone or material.`);
+}
 if (!APPLY) console.log("Dry run — pass --apply to write.");

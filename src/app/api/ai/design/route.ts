@@ -115,6 +115,7 @@ export async function POST(req: Request) {
       clearInstruction: plan.clearInstruction ?? null,
       offTopic: plan.offTopic,
       budgetInr: plan.budgetInr,
+      unavailable: plan.unavailable ?? [],
       totalInr,
       trimmed,
       items: lines,
